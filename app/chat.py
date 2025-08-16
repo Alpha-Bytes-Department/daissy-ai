@@ -1,7 +1,8 @@
-import openai
+import json
 import os
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
+from openai import OpenAI
 
 try:
     from .chroma import ChromaDBManager
@@ -13,8 +14,8 @@ load_dotenv()
 class RAGChatBot:
     def __init__(self):
         # Initialize OpenAI client
-        openai.api_key = os.getenv("OPENAI_API_KEY")
-        if not openai.api_key:
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        if not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY environment variable is required")
         
         # Initialize ChromaDB manager
@@ -24,26 +25,25 @@ class RAGChatBot:
         self.conversation_history = []
         
         # System prompt for the consultation AI
-        self.system_prompt = """You are a professional consultant AI that helps users by:
-        1. Finding relevant consultation audio files that match their needs
-        2. Acting as a consultant yourself to continue the conversation and provide guidance
+        self.system_prompt = """You are a professional consultant AI that helps users by providing guidance and determining when audio resources are necessary.
 
-        When responding:
-        - If you find a relevant consultation audio, mention it and provide the user with additional consultant guidance
-        - Provide professional, empathetic, and helpful advice as a consultant would
-        - Ask follow-up questions when appropriate to better understand the user's situation
-        - Offer practical suggestions and guidance beyond just directing to audio files
-        - Maintain a warm, professional consultant tone throughout the conversation
-        - You can reference the consultation audio as supplementary material while also providing your own consultation
+        Your capabilities:
+        1. Provide professional consultation and advice
+        2. Determine when audio files would be helpful for the user
+        3. Search for and recommend relevant consultation audio when appropriate
 
-        Your role is to be both a resource finder AND an active consultant in the conversation.
-        Provide comprehensive help that includes both the audio resource and your own professional guidance.
+        Guidelines:
+        - Provide empathetic, professional advice as a consultant would
+        - Only recommend audio files when they would genuinely add value to the consultation
+        - Ask follow-up questions to better understand the user's situation
+        - Maintain a warm, professional consultant tone
+        - Use the search_audio_resources function only when audio would enhance your consultation
         """
     
-    def retrieve_relevant_context(self, query: str, n_results: int = 3) -> List[Dict[str, Any]]:
-        """Retrieve relevant consultation audio summaries based on the user query"""
+    def search_audio_resources(self, query: str, context: str = "") -> Dict[str, Any]:
+        """Tool function to search for relevant audio resources"""
         try:
-            search_results = self.chroma_manager.search_similar(query, n_results)
+            search_results = self.chroma_manager.search_similar(query, n_results=3)
             
             context_items = []
             for i, (doc, metadata, distance, doc_id) in enumerate(zip(
@@ -52,60 +52,86 @@ class RAGChatBot:
                 search_results["distances"],
                 search_results["ids"]
             )):
-                context_items.append({
-                    "audio_id": metadata.get("audio_id", doc_id),
-                    "summary": doc,
-                    "metadata": metadata,
-                    "relevance_score": 1 - distance,  # Convert distance to similarity score
-                    "rank": i + 1
-                })
+                # Only include highly relevant results (distance < 0.7)
+                if distance < 0.7:
+                    context_items.append({
+                        "audio_id": metadata.get("audio_id", doc_id),
+                        "summary": doc,
+                        "metadata": metadata,
+                        "relevance_score": 1 - distance,
+                        "rank": i + 1
+                    })
             
-            return context_items
+            # Find actual audio files
+            audio_files = []
+            uploads_dir = "uploads"
+            
+            if context_items and os.path.exists(uploads_dir):
+                # Only get the most relevant audio file
+                item = context_items[0]
+                audio_id = item["audio_id"]
+                
+                for filename in os.listdir(uploads_dir):
+                    if filename.startswith(audio_id):
+                        audio_files.append({
+                            "audio_id": audio_id,
+                            "filename": filename,
+                            "file_path": os.path.join(uploads_dir, filename),
+                            "relevance_score": item["relevance_score"],
+                            "summary": item["summary"]
+                        })
+                        break
+            
+            return {
+                "found_relevant_audio": len(audio_files) > 0,
+                "audio_files": audio_files,
+                "context_items": context_items,
+                "search_query": query
+            }
         except Exception as e:
-            raise Exception(f"Error retrieving context: {str(e)}")
+            return {
+                "found_relevant_audio": False,
+                "audio_files": [],
+                "context_items": [],
+                "error": str(e)
+            }
+
+    def call_function(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute tool functions"""
+        if name == "search_audio_resources":
+            return self.search_audio_resources(**args)
+        raise ValueError(f"Unknown function: {name}")
+
+    def get_tools_definition(self) -> List[Dict[str, Any]]:
+        """Define available tools for the AI agent"""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_audio_resources",
+                    "description": "Search for relevant consultation audio files when they would enhance the user's consultation experience. Only use this when audio resources would genuinely add value to your consultation.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query to find relevant audio consultation content"
+                            },
+                            "context": {
+                                "type": "string", 
+                                "description": "Additional context about why audio would be helpful for this consultation"
+                            }
+                        },
+                        "required": ["query"],
+                        "additionalProperties": False,
+                    },
+                }
+            }
+        ]
     
-    def format_context_for_llm(self, context_items: List[Dict[str, Any]]) -> str:
-        """Format retrieved context for the LLM"""
-        if not context_items:
-            return "No relevant audio content found for this query."
-        
-        formatted_context = []
-        for item in context_items:
-            formatted_context.append(f"""Audio ID: {item['audio_id']}
-Summary: {item['summary']}
-Relevance Score: {item['relevance_score']:.3f}
----""")
-        
-        return "\n".join(formatted_context)
-    
-    def generate_response(self, user_query: str, context_available: bool = False, context_summary: str = "") -> str:
-        """Generate response as a consultant, optionally referencing available consultation audio"""
+    def generate_response_with_tools(self, user_query: str) -> Dict[str, Any]:
+        """Generate response using the agent tool call system"""
         try:
-            if context_available and context_summary:
-                user_content = f"""A user is asking: "{user_query}"
-
-I have found a relevant consultation audio that covers: {context_summary}
-
-Please act as a professional consultant and:
-1. Mention the relevant consultation audio I found for them
-2. Provide your own consultant guidance and advice on their question
-3. Continue the conversation as their consultant, offering practical help
-4. Ask follow-up questions if appropriate to better understand their needs
-
-Provide a comprehensive consultant response that includes both the audio resource and your own professional guidance."""
-            else:
-                user_content = f"""A user is asking: "{user_query}"
-
-I did not find any specific consultation audio for this query.
-
-Please act as a professional consultant and:
-1. Acknowledge that while I don't have a specific consultation audio for this topic, you can still help as their consultant
-2. Provide professional guidance and advice on their question
-3. Continue the conversation as their consultant, offering practical help
-4. Ask follow-up questions if appropriate to better understand their needs
-
-Provide a comprehensive consultant response focused on helping them with their inquiry."""
-
             # Build messages with conversation history
             messages = [{"role": "system", "content": self.system_prompt}]
             
@@ -114,70 +140,88 @@ Provide a comprehensive consultant response focused on helping them with their i
             messages.extend(recent_history)
             
             # Add current user message
-            messages.append({"role": "user", "content": user_content})
+            messages.append({"role": "user", "content": user_query})
             
-            response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",
+            # Get tools definition
+            tools = self.get_tools_definition()
+            
+            # Step 1: Call model with tools
+            response = self.client.chat.completions.create(
+                model="gpt-4.1-nano",
                 messages=messages,
+                tools=tools,
+                tool_choice="auto",
                 temperature=0.7,
-                max_tokens=400  # Increased for more comprehensive consultant responses
+                max_tokens=400
             )
             
-            ai_response = response.choices[0].message.content
+            assistant_message = response.choices[0].message
+            messages.append(assistant_message)
+            
+            # Step 2: Handle function calls if any
+            audio_files = []
+            function_results = []
+            
+            if assistant_message.tool_calls:
+                for tool_call in assistant_message.tool_calls:
+                    # Step 3: Execute function
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments)
+                    function_result = self.call_function(function_name, function_args)
+                    function_results.append(function_result)
+                    
+                    # Extract audio files if found
+                    if function_result.get("found_relevant_audio"):
+                        audio_files.extend(function_result.get("audio_files", []))
+                    
+                    # Step 4: Append function result to messages
+                    messages.append({
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": json.dumps(function_result)
+                    })
+                
+                # Step 5: Get final response with function results
+                final_response = self.client.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    messages=messages,
+                    tools=tools,
+                    temperature=0.7,
+                    max_tokens=400
+                )
+                
+                ai_response = final_response.choices[0].message.content
+            else:
+                ai_response = assistant_message.content
             
             # Store this interaction in conversation history
             self.conversation_history.append({"role": "user", "content": user_query})
             self.conversation_history.append({"role": "assistant", "content": ai_response})
             
-            return ai_response
+            return {
+                "response": ai_response,
+                "audio_files": audio_files,
+                "function_calls_made": len(function_results),
+                "function_results": function_results
+            }
+            
         except Exception as e:
-            raise Exception(f"Error generating response: {str(e)}")
+            raise Exception(f"Error generating response with tools: {str(e)}")
     
-    def chat(self, user_query: str, n_results: int = 3) -> Dict[str, Any]:
-        """Main chat function that acts as a consultant and provides relevant consultation audio"""
+    def chat(self, user_query: str) -> Dict[str, Any]:
+        """Main chat function that acts as a consultant and intelligently provides audio when necessary"""
         try:
-            # Retrieve relevant context
-            context_items = self.retrieve_relevant_context(user_query, n_results)
-            
-            # Prepare context summary for the AI consultant
-            context_summary = ""
-            has_relevant_audio = len(context_items) > 0
-            
-            if has_relevant_audio:
-                # Use the most relevant item's summary for context
-                context_summary = context_items[0]["summary"][:300] + "..." if len(context_items[0]["summary"]) > 300 else context_items[0]["summary"]
-            
-            # Generate response as a consultant
-            response = self.generate_response(user_query, has_relevant_audio, context_summary)
-            
-            # Prepare audio file paths for relevant sources - limit to 1 most relevant
-            audio_files = []
-            uploads_dir = "uploads"
-            
-            # Only get the most relevant audio file (first in the sorted list)
-            if context_items:
-                item = context_items[0]  # Most relevant item
-                audio_id = item["audio_id"]
-                
-                # Look for audio file with this ID in uploads folder
-                if os.path.exists(uploads_dir):
-                    for filename in os.listdir(uploads_dir):
-                        if filename.startswith(audio_id):
-                            audio_files.append({
-                                "audio_id": audio_id,
-                                "filename": filename,
-                                "file_path": os.path.join(uploads_dir, filename),
-                                "relevance_score": item["relevance_score"],
-                                "summary": item["summary"]
-                            })
-                            break
+            # Use the agent-based approach to generate response and determine if audio is needed
+            result = self.generate_response_with_tools(user_query)
             
             return {
-                "response": response,
+                "response": result["response"],
                 "query": user_query,
-                "context_used": context_items,
-                "audio_files": audio_files,  # Now contains at most 1 audio file
-                "sources_count": len(context_items)
+                "audio_files": result["audio_files"],  # Only contains audio when AI determined it was necessary
+                "audio_provided": len(result["audio_files"]) > 0,
+                "function_calls_made": result["function_calls_made"],
+                "conversation_length": len(self.conversation_history)
             }
             
         except Exception as e:
@@ -189,6 +233,12 @@ Provide a comprehensive consultant response focused on helping them with their i
         
         if not os.path.exists(uploads_dir):
             return None
+        
+        for filename in os.listdir(uploads_dir):
+            if filename.startswith(audio_id):
+                return os.path.join(uploads_dir, filename)
+        
+        return None
     
     def reset_conversation(self):
         """Reset the conversation history for a new consultation session"""
@@ -198,9 +248,3 @@ Provide a comprehensive consultant response focused on helping them with their i
     def get_conversation_length(self) -> int:
         """Get the current conversation length"""
         return len(self.conversation_history)
-        
-        for filename in os.listdir(uploads_dir):
-            if filename.startswith(audio_id):
-                return os.path.join(uploads_dir, filename)
-        
-        return None

@@ -5,15 +5,9 @@ import os
 import shutil
 from typing import Dict, Any, List
 from pydantic import BaseModel
-
-try:
-    from .transcribe import AudioProcessor
-    from .chroma import ChromaDBManager
-    from .chat import RAGChatBot
-except ImportError:
-    from transcribe import AudioProcessor
-    from chroma import ChromaDBManager
-    from chat import RAGChatBot
+from transcribe import AudioProcessor
+from chroma import ChromaDBManager
+from chat import RAGChatBot
 
 router = APIRouter()
 
@@ -29,9 +23,9 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     query: str
-    sources_count: int
     audio_files: List[Dict[str, Any]]  # Will contain at most 1 audio file
-    context_used: List[Dict[str, Any]]
+    audio_provided: bool
+    conversation_length: int
 
 # Ensure uploads directory exists
 UPLOAD_DIR = "uploads"
@@ -166,15 +160,15 @@ async def chat_with_audio(request: ChatRequest) -> ChatResponse:
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
-        # Get chat response with audio references (using default 3 sources)
-        chat_result = chat_bot.chat(request.query, n_results=3)
+        # Get chat response with audio references
+        chat_result = chat_bot.chat(request.query)
         
         return ChatResponse(
             response=chat_result["response"],
             query=chat_result["query"],
-            sources_count=chat_result["sources_count"],
             audio_files=chat_result["audio_files"],
-            context_used=chat_result["context_used"]
+            audio_provided=chat_result["audio_provided"],
+            conversation_length=chat_result["conversation_length"]
         )
         
     except HTTPException:
@@ -182,32 +176,6 @@ async def chat_with_audio(request: ChatRequest) -> ChatResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
-@router.get("/chat")
-async def chat_with_audio_get(query: str) -> Dict[str, Any]:
-    """
-    Chat with the AI consultant using GET request.
-    The AI acts as both a resource finder and an active consultant.
-    """
-    try:
-        if not query.strip():
-            raise HTTPException(status_code=400, detail="Query cannot be empty")
-        
-        # Get chat response with audio references (using default 3 sources)
-        chat_result = chat_bot.chat(query, n_results=3)
-        
-        return {
-            "success": True,
-            "response": chat_result["response"],
-            "query": chat_result["query"],
-            "sources_count": chat_result["sources_count"],
-            "audio_files": chat_result["audio_files"],
-            "context_used": chat_result["context_used"]
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
 @router.get("/download-audio/{audio_id}")
 async def download_audio(audio_id: str):

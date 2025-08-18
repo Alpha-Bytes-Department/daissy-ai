@@ -28,7 +28,7 @@ class AudioProcessor:
         """Summarize transcribed text using OpenAI GPT"""
         try:
             response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4.1-mini",
                 messages=[
                     {
                         "role": "system",

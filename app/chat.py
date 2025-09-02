@@ -26,11 +26,14 @@ class RAGChatBot:
         # Session management
         self.session_id = session_id or str(uuid.uuid4())
         
-        # Create session in database if it doesn't exist
-        self.db_manager.create_chat_session(self.session_id)
+        # Create session in database if it doesn't exist (optimized)
+        self.db_manager.create_chat_session_if_not_exists(self.session_id)
         
         # Store conversation history for continuity (loaded from database)
         self.conversation_history = self._load_conversation_history()
+        
+        # Cache for pending messages to batch database writes
+        self._pending_messages = []
         
         # System prompt for the consultation AI
         self.system_prompt = """You are a professional consultant AI that helps users by providing guidance and determining when audio resources are necessary.
@@ -59,19 +62,26 @@ class RAGChatBot:
     
     def _save_message_to_db(self, role: str, content: str, audio_files: Optional[List[Dict]] = None, 
                            function_calls: Optional[List[Dict]] = None) -> None:
-        """Save a message to the database"""
-        try:
-            message_id = str(uuid.uuid4())
-            self.db_manager.save_message(
-                session_id=self.session_id,
-                message_id=message_id,
-                role=role,
-                content=content,
-                audio_files=audio_files,
-                function_calls=function_calls
-            )
-        except Exception as e:
-            print(f"Warning: Could not save message to database: {e}")
+        """Queue a message for batch saving to the database"""
+        message_id = str(uuid.uuid4())
+        self._pending_messages.append({
+            "session_id": self.session_id,
+            "message_id": message_id,
+            "role": role,
+            "content": content,
+            "audio_files": audio_files,
+            "function_calls": function_calls
+        })
+    
+    def _flush_pending_messages(self) -> None:
+        """Save all pending messages to database in a single batch operation"""
+        if self._pending_messages:
+            try:
+                self.db_manager.save_messages_batch(self._pending_messages)
+                self._pending_messages.clear()
+            except Exception as e:
+                print(f"Warning: Could not save messages to database: {e}")
+                self._pending_messages.clear()  # Clear to prevent memory buildup
     
     def get_session_id(self) -> str:
         """Get the current session ID"""
@@ -236,9 +246,12 @@ class RAGChatBot:
             self.conversation_history.append({"role": "user", "content": user_query})
             self.conversation_history.append({"role": "assistant", "content": ai_response})
             
-            # Save messages to database
+            # Queue messages for batch database save
             self._save_message_to_db("user", user_query)
             self._save_message_to_db("assistant", ai_response, audio_files=audio_files, function_calls=function_results)
+            
+            # Flush pending messages to database
+            self._flush_pending_messages()
             
             return {
                 "response": ai_response,
@@ -284,6 +297,9 @@ class RAGChatBot:
     
     def reset_conversation(self):
         """Reset the conversation history for a new consultation session"""
+        # Flush any pending messages before resetting
+        self._flush_pending_messages()
+        
         # Clear in-memory history
         self.conversation_history = []
         
@@ -292,7 +308,7 @@ class RAGChatBot:
         
         # Create new session
         self.session_id = str(uuid.uuid4())
-        self.db_manager.create_chat_session(self.session_id)
+        self.db_manager.create_chat_session_if_not_exists(self.session_id)
         
         return {
             "message": "Conversation history cleared. Ready for new consultation session.",
@@ -304,15 +320,18 @@ class RAGChatBot:
         return len(self.conversation_history)
     
     def get_session_stats(self) -> Dict[str, Any]:
-        """Get detailed session statistics"""
+        """Get detailed session statistics (optimized version)"""
         try:
-            return self.db_manager.get_session_stats(self.session_id)
+            return self.db_manager.get_session_stats_optimized(self.session_id)
         except Exception as e:
             return {"error": f"Could not retrieve session stats: {e}"}
     
     def load_session(self, session_id: str) -> Dict[str, Any]:
         """Load an existing session"""
         try:
+            # Flush any pending messages from current session
+            self._flush_pending_messages()
+            
             self.session_id = session_id
             self.conversation_history = self._load_conversation_history()
             return {

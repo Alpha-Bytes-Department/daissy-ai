@@ -19,16 +19,25 @@ chroma_manager = ChromaDBManager()
 chat_bots = {}
 
 def get_or_create_chat_bot(session_id: Optional[str] = None) -> RAGChatBot:
-    """Get existing chat bot for session or create new one"""
+    """Get existing chat bot for session or create new one - optimized"""
     if session_id is None:
-        # Create new session
+        # Create new session without caching (one-time use)
         return RAGChatBot()
     
-    if session_id not in chat_bots:
-        # Create chat bot for existing session
-        chat_bots[session_id] = RAGChatBot(session_id=session_id)
+    # Check if we already have this chat bot in memory
+    if session_id in chat_bots:
+        return chat_bots[session_id]
     
-    return chat_bots[session_id]
+    # Create new chat bot and cache it
+    chat_bot = RAGChatBot(session_id=session_id)
+    chat_bots[session_id] = chat_bot
+    return chat_bot
+
+def cleanup_inactive_chat_bots():
+    """Remove chat bots that haven't been used recently to free memory"""
+    # This could be called periodically or when memory usage is high
+    # For now, we'll keep it simple and rely on explicit cleanup
+    pass
 
 # Pydantic models for request/response
 class ChatRequest(BaseModel):
@@ -196,7 +205,6 @@ async def chat_with_audio(request: ChatRequest) -> ChatResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
-
 @router.get("/download-audio/{audio_id}")
 async def download_audio(audio_id: str):
     """
@@ -288,28 +296,58 @@ async def get_chat_status(session_id: Optional[str] = Query(None)) -> Dict[str, 
     Get current conversation status and length
     """
     try:
-        chat_bot = get_or_create_chat_bot(session_id)
-        conversation_length = chat_bot.get_conversation_length()
-        session_stats = chat_bot.get_session_stats()
+        # If session_id is provided and we have the chat bot cached, use it
+        # Otherwise, we'll need to create/load it
+        if session_id and session_id in chat_bots:
+            chat_bot = chat_bots[session_id]
+            conversation_length = chat_bot.get_conversation_length()
+            session_stats = chat_bot.get_session_stats()
+        else:
+            # For status checks, we can get stats directly from database without loading full chat bot
+            from database import get_database_manager
+            db_manager = get_database_manager()
+            
+            if session_id:
+                session_stats = db_manager.get_session_stats_optimized(session_id)
+                if "error" in session_stats:
+                    raise HTTPException(status_code=404, detail=session_stats["error"])
+                conversation_length = session_stats.get("message_count", 0)
+            else:
+                # Create new session for status check
+                chat_bot = get_or_create_chat_bot(session_id)
+                conversation_length = chat_bot.get_conversation_length()
+                session_stats = chat_bot.get_session_stats()
+                session_id = chat_bot.get_session_id()
         
         return {
             "success": True,
-            "session_id": chat_bot.get_session_id(),
+            "session_id": session_id or "new",
             "conversation_length": conversation_length,
             "status": "active" if conversation_length > 0 else "new_session",
             "session_stats": session_stats
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
 
 @router.get("/chat/history/{session_id}")
 async def get_chat_history(session_id: str) -> Dict[str, Any]:
     """
-    Get the complete chat history for a session
+    Get the complete chat history for a session - optimized to use direct DB query
     """
     try:
-        chat_bot = get_or_create_chat_bot(session_id)
-        history = chat_bot.get_full_conversation_history()
+        # Get history directly from database without loading full chat bot
+        from database import get_database_manager
+        db_manager = get_database_manager()
+        
+        history = db_manager.get_session_history(session_id)
+        
+        if not history:
+            # Check if session exists
+            session_stats = db_manager.get_session_stats_optimized(session_id)
+            if "error" in session_stats:
+                raise HTTPException(status_code=404, detail="Session not found")
         
         return {
             "success": True,
@@ -317,6 +355,8 @@ async def get_chat_history(session_id: str) -> Dict[str, Any]:
             "history": history,
             "message_count": len(history)
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"History retrieval failed: {str(e)}")
 
@@ -343,3 +383,55 @@ async def health_check() -> Dict[str, str]:
     Health check endpoint
     """
     return {"status": "healthy", "service": "audio-processing-api"}
+
+@router.get("/performance/stats")
+async def get_performance_stats() -> Dict[str, Any]:
+    """
+    Get performance statistics and system info
+    """
+    try:
+        from database import get_database_manager
+        db_manager = get_database_manager()
+        
+        # Get basic stats
+        active_sessions = len(chat_bots)
+        
+        # Get database connection pool info if available
+        pool_info = {}
+        if hasattr(db_manager.engine.pool, 'size'):
+            pool_info = {
+                "pool_size": db_manager.engine.pool.size(),
+                "checked_in": db_manager.engine.pool.checkedin(),
+                "checked_out": db_manager.engine.pool.checkedout(),
+                "overflow": db_manager.engine.pool.overflow(),
+            }
+        
+        return {
+            "success": True,
+            "active_chat_sessions": active_sessions,
+            "cached_sessions": list(chat_bots.keys()),
+            "database_pool": pool_info,
+            "session_cache_size": len(db_manager._session_cache) if hasattr(db_manager, '_session_cache') else 0
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Performance stats failed: {str(e)}")
+
+@router.post("/performance/cleanup")
+async def cleanup_cache() -> Dict[str, Any]:
+    """
+    Clean up cached chat bots and sessions (admin endpoint)
+    """
+    try:
+        # Count before cleanup
+        sessions_before = len(chat_bots)
+        
+        # Clear chat bot cache
+        chat_bots.clear()
+        
+        return {
+            "success": True,
+            "message": f"Cleaned up {sessions_before} cached chat sessions",
+            "sessions_cleared": sessions_before
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")

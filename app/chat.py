@@ -1,18 +1,17 @@
 import json
 import os
+import uuid
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from openai import OpenAI
 
-try:
-    from .chroma import ChromaDBManager
-except ImportError:
-    from chroma import ChromaDBManager
+from chroma import ChromaDBManager
+from database import get_database_manager
 
 load_dotenv()
 
 class RAGChatBot:
-    def __init__(self):
+    def __init__(self, session_id: Optional[str] = None):
         # Initialize OpenAI client
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         if not os.getenv("OPENAI_API_KEY"):
@@ -21,8 +20,17 @@ class RAGChatBot:
         # Initialize ChromaDB manager
         self.chroma_manager = ChromaDBManager()
         
-        # Store conversation history for continuity
-        self.conversation_history = []
+        # Initialize database manager for persistent storage
+        self.db_manager = get_database_manager()
+        
+        # Session management
+        self.session_id = session_id or str(uuid.uuid4())
+        
+        # Create session in database if it doesn't exist
+        self.db_manager.create_chat_session(self.session_id)
+        
+        # Store conversation history for continuity (loaded from database)
+        self.conversation_history = self._load_conversation_history()
         
         # System prompt for the consultation AI
         self.system_prompt = """You are a professional consultant AI that helps users by providing guidance and determining when audio resources are necessary.
@@ -39,6 +47,35 @@ class RAGChatBot:
         - Maintain a warm, professional consultant tone
         - Use the search_audio_resources function only when audio would enhance your consultation
         """
+    
+    def _load_conversation_history(self) -> List[Dict[str, str]]:
+        """Load conversation history from database"""
+        try:
+            # Load recent conversation history (last 10 messages for context)
+            return self.db_manager.get_session_history(self.session_id, limit=10)
+        except Exception as e:
+            print(f"Warning: Could not load conversation history: {e}")
+            return []
+    
+    def _save_message_to_db(self, role: str, content: str, audio_files: Optional[List[Dict]] = None, 
+                           function_calls: Optional[List[Dict]] = None) -> None:
+        """Save a message to the database"""
+        try:
+            message_id = str(uuid.uuid4())
+            self.db_manager.save_message(
+                session_id=self.session_id,
+                message_id=message_id,
+                role=role,
+                content=content,
+                audio_files=audio_files,
+                function_calls=function_calls
+            )
+        except Exception as e:
+            print(f"Warning: Could not save message to database: {e}")
+    
+    def get_session_id(self) -> str:
+        """Get the current session ID"""
+        return self.session_id
     
     def search_audio_resources(self, query: str, context: str = "") -> Dict[str, Any]:
         """Tool function to search for relevant audio resources"""
@@ -199,6 +236,10 @@ class RAGChatBot:
             self.conversation_history.append({"role": "user", "content": user_query})
             self.conversation_history.append({"role": "assistant", "content": ai_response})
             
+            # Save messages to database
+            self._save_message_to_db("user", user_query)
+            self._save_message_to_db("assistant", ai_response, audio_files=audio_files, function_calls=function_results)
+            
             return {
                 "response": ai_response,
                 "audio_files": audio_files,
@@ -221,7 +262,8 @@ class RAGChatBot:
                 "audio_files": result["audio_files"],  # Only contains audio when AI determined it was necessary
                 "audio_provided": len(result["audio_files"]) > 0,
                 "function_calls_made": result["function_calls_made"],
-                "conversation_length": len(self.conversation_history)
+                "conversation_length": len(self.conversation_history),
+                "session_id": self.session_id
             }
             
         except Exception as e:
@@ -242,9 +284,52 @@ class RAGChatBot:
     
     def reset_conversation(self):
         """Reset the conversation history for a new consultation session"""
+        # Clear in-memory history
         self.conversation_history = []
-        return {"message": "Conversation history cleared. Ready for new consultation session."}
+        
+        # End current session in database
+        self.db_manager.end_session(self.session_id)
+        
+        # Create new session
+        self.session_id = str(uuid.uuid4())
+        self.db_manager.create_chat_session(self.session_id)
+        
+        return {
+            "message": "Conversation history cleared. Ready for new consultation session.",
+            "new_session_id": self.session_id
+        }
     
     def get_conversation_length(self) -> int:
         """Get the current conversation length"""
         return len(self.conversation_history)
+    
+    def get_session_stats(self) -> Dict[str, Any]:
+        """Get detailed session statistics"""
+        try:
+            return self.db_manager.get_session_stats(self.session_id)
+        except Exception as e:
+            return {"error": f"Could not retrieve session stats: {e}"}
+    
+    def load_session(self, session_id: str) -> Dict[str, Any]:
+        """Load an existing session"""
+        try:
+            self.session_id = session_id
+            self.conversation_history = self._load_conversation_history()
+            return {
+                "success": True,
+                "session_id": session_id,
+                "conversation_length": len(self.conversation_history),
+                "message": f"Loaded session {session_id}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Could not load session: {e}"
+            }
+    
+    def get_full_conversation_history(self) -> List[Dict[str, Any]]:
+        """Get the complete conversation history for the current session"""
+        try:
+            return self.db_manager.get_session_history(self.session_id)
+        except Exception as e:
+            return []

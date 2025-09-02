@@ -1,9 +1,9 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from fastapi.responses import JSONResponse, FileResponse
 import uuid
 import os
 import shutil
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from transcribe import AudioProcessor
 from chroma import ChromaDBManager
@@ -14,11 +14,26 @@ router = APIRouter()
 # Initialize processors
 audio_processor = AudioProcessor()
 chroma_manager = ChromaDBManager()
-chat_bot = RAGChatBot()
+
+# Chat bots will be managed per session
+chat_bots = {}
+
+def get_or_create_chat_bot(session_id: Optional[str] = None) -> RAGChatBot:
+    """Get existing chat bot for session or create new one"""
+    if session_id is None:
+        # Create new session
+        return RAGChatBot()
+    
+    if session_id not in chat_bots:
+        # Create chat bot for existing session
+        chat_bots[session_id] = RAGChatBot(session_id=session_id)
+    
+    return chat_bots[session_id]
 
 # Pydantic models for request/response
 class ChatRequest(BaseModel):
     query: str
+    session_id: Optional[str] = None
 
 class ChatResponse(BaseModel):
     response: str
@@ -26,6 +41,7 @@ class ChatResponse(BaseModel):
     audio_files: List[Dict[str, Any]]  # Will contain at most 1 audio file
     audio_provided: bool
     conversation_length: int
+    session_id: str
 
 # Ensure uploads directory exists
 UPLOAD_DIR = "uploads"
@@ -160,6 +176,9 @@ async def chat_with_audio(request: ChatRequest) -> ChatResponse:
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
+        # Get or create chat bot for session
+        chat_bot = get_or_create_chat_bot(request.session_id)
+        
         # Get chat response with audio references
         chat_result = chat_bot.chat(request.query)
         
@@ -168,7 +187,8 @@ async def chat_with_audio(request: ChatRequest) -> ChatResponse:
             query=chat_result["query"],
             audio_files=chat_result["audio_files"],
             audio_provided=chat_result["audio_provided"],
-            conversation_length=chat_result["conversation_length"]
+            conversation_length=chat_result["conversation_length"],
+            session_id=chat_result["session_id"]
         )
         
     except HTTPException:
@@ -243,12 +263,18 @@ async def get_audio_file_info(audio_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"File info retrieval failed: {str(e)}")
 
 @router.post("/chat/reset")
-async def reset_conversation() -> Dict[str, Any]:
+async def reset_conversation(session_id: Optional[str] = Query(None)) -> Dict[str, Any]:
     """
     Reset the conversation history to start a new consultation session
     """
     try:
+        chat_bot = get_or_create_chat_bot(session_id)
         result = chat_bot.reset_conversation()
+        
+        # Remove from active chat bots if it exists
+        if session_id and session_id in chat_bots:
+            del chat_bots[session_id]
+        
         return {
             "success": True,
             **result
@@ -257,19 +283,59 @@ async def reset_conversation() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
 
 @router.get("/chat/status")
-async def get_chat_status() -> Dict[str, Any]:
+async def get_chat_status(session_id: Optional[str] = Query(None)) -> Dict[str, Any]:
     """
     Get current conversation status and length
     """
     try:
+        chat_bot = get_or_create_chat_bot(session_id)
         conversation_length = chat_bot.get_conversation_length()
+        session_stats = chat_bot.get_session_stats()
+        
         return {
             "success": True,
+            "session_id": chat_bot.get_session_id(),
             "conversation_length": conversation_length,
-            "status": "active" if conversation_length > 0 else "new_session"
+            "status": "active" if conversation_length > 0 else "new_session",
+            "session_stats": session_stats
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
+
+@router.get("/chat/history/{session_id}")
+async def get_chat_history(session_id: str) -> Dict[str, Any]:
+    """
+    Get the complete chat history for a session
+    """
+    try:
+        chat_bot = get_or_create_chat_bot(session_id)
+        history = chat_bot.get_full_conversation_history()
+        
+        return {
+            "success": True,
+            "session_id": session_id,
+            "history": history,
+            "message_count": len(history)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"History retrieval failed: {str(e)}")
+
+@router.post("/chat/load-session")
+async def load_chat_session(session_id: str = Query(...)) -> Dict[str, Any]:
+    """
+    Load an existing chat session
+    """
+    try:
+        chat_bot = get_or_create_chat_bot()
+        result = chat_bot.load_session(session_id)
+        
+        if result.get("success"):
+            # Store in active chat bots
+            chat_bots[session_id] = chat_bot
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Session load failed: {str(e)}")
 
 @router.get("/health")
 async def health_check() -> Dict[str, str]:

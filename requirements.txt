@@ -101,3 +101,6 @@ websocket-client==1.8.0
 websockets==15.0.1
 whisper.ai==1.0.0.1
 zipp==3.23.0
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.32
+alembic==1.13.2

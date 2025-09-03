@@ -348,6 +348,7 @@ class RAGChatBot:
     def get_full_conversation_history(self) -> List[Dict[str, Any]]:
         """Get the complete conversation history for the current session"""
         try:
-            return self.db_manager.get_session_history(self.session_id)
+            return self.db_manager.get_full_session_messages(self.session_id)
         except Exception as e:
+            print(f"Warning: Could not retrieve full conversation history: {e}")
             return []

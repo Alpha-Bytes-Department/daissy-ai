@@ -91,10 +91,10 @@ class DatabaseManager:
             self._session_cache.add(session_id)
             return True
     
-    def save_messages_batch(self, messages_data: List[Dict[str, Any]]) -> List[ChatMessage]:
-        """Save multiple messages in a single transaction"""
+    def save_messages_batch(self, messages_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Save multiple messages in a single transaction - returns dict data to avoid detached instances"""
         with self.get_db_session() as db:
-            messages = []
+            saved_messages = []
             for msg_data in messages_data:
                 # Ensure session exists (but only check once per batch)
                 session_id = msg_data["session_id"]
@@ -111,15 +111,25 @@ class DatabaseManager:
                     extra_data=msg_data.get("extra_data")
                 )
                 db.add(message)
-                messages.append(message)
+                
+                # Convert to dict immediately to avoid detached instance issues
+                saved_messages.append({
+                    "session_id": message.session_id,
+                    "message_id": message.message_id,
+                    "role": message.role,
+                    "content": message.content,
+                    "audio_files": message.audio_files,
+                    "function_calls": message.function_calls,
+                    "extra_data": message.extra_data
+                })
             
-            return messages
+            return saved_messages
     
     def save_message(self, session_id: str, message_id: str, role: str, content: str, 
                     audio_files: Optional[List[Dict]] = None, 
                     function_calls: Optional[List[Dict]] = None,
-                    extra_data: Optional[Dict] = None) -> ChatMessage:
-        """Save a single chat message to the database"""
+                    extra_data: Optional[Dict] = None) -> Dict[str, Any]:
+        """Save a single chat message to the database - returns dict data"""
         return self.save_messages_batch([{
             "session_id": session_id,
             "message_id": message_id,
@@ -130,8 +140,8 @@ class DatabaseManager:
             "extra_data": extra_data
         }])[0]
     
-    def get_session_messages(self, session_id: str, limit: Optional[int] = None) -> List[ChatMessage]:
-        """Get all messages for a session, optionally limited to recent messages"""
+    def get_session_messages(self, session_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get all messages for a session, optionally limited to recent messages - returns dict data"""
         with self.get_db_session() as db:
             query = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
             
@@ -140,16 +150,36 @@ class DatabaseManager:
                 query = query.order_by(ChatMessage.timestamp.desc()).limit(limit)
                 messages = query.all()
                 messages.reverse()  # Return in chronological order
-                return messages
             else:
                 query = query.order_by(ChatMessage.timestamp.asc())
-                return query.all()
+                messages = query.all()
+            
+            # Convert to dict while session is active to avoid detached instance errors
+            return [
+                {
+                    "id": msg.id,
+                    "session_id": msg.session_id,
+                    "message_id": msg.message_id,
+                    "role": msg.role,
+                    "content": msg.content,
+                    "timestamp": msg.timestamp,
+                    "audio_files": msg.audio_files,
+                    "function_calls": msg.function_calls,
+                    "extra_data": msg.extra_data
+                }
+                for msg in messages
+            ]
     
     def get_session_history(self, session_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get session history in chat format (role, content) - optimized single query"""
         messages = self.get_session_messages(session_id, limit)
         
-        return [{"role": msg.role, "content": msg.content} for msg in messages]
+        return [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+    
+    def get_full_session_messages(self, session_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get complete message data including metadata - returns full message details"""
+        messages = self.get_session_messages(session_id, limit)
+        return messages  # Already converted to dict format with all fields
     
     def end_session(self, session_id: str) -> bool:
         """Mark a session as inactive"""

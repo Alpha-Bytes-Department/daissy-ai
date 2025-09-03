@@ -332,7 +332,7 @@ async def get_chat_status(session_id: Optional[str] = Query(None)) -> Dict[str, 
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
 
 @router.get("/chat/history/{session_id}")
-async def get_chat_history(session_id: str) -> Dict[str, Any]:
+async def get_chat_history(session_id: str, include_metadata: bool = Query(False)) -> Dict[str, Any]:
     """
     Get the complete chat history for a session - optimized to use direct DB query
     """
@@ -341,20 +341,43 @@ async def get_chat_history(session_id: str) -> Dict[str, Any]:
         from database import get_database_manager
         db_manager = get_database_manager()
         
-        history = db_manager.get_session_history(session_id)
-        
-        if not history:
-            # Check if session exists
-            session_stats = db_manager.get_session_stats_optimized(session_id)
-            if "error" in session_stats:
-                raise HTTPException(status_code=404, detail="Session not found")
-        
-        return {
-            "success": True,
-            "session_id": session_id,
-            "history": history,
-            "message_count": len(history)
-        }
+        if include_metadata:
+            # Get full message details including metadata
+            messages = db_manager.get_full_session_messages(session_id)
+            
+            if not messages:
+                # Check if session exists
+                session_stats = db_manager.get_session_stats_optimized(session_id)
+                if "error" in session_stats:
+                    raise HTTPException(status_code=404, detail="Session not found")
+            
+            # Convert to chat history format for API response
+            history = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+            
+            return {
+                "success": True,
+                "session_id": session_id,
+                "history": history,
+                "full_messages": messages,  # Include full message data with metadata
+                "message_count": len(messages)
+            }
+        else:
+            # Get simple chat history (role, content only)
+            history = db_manager.get_session_history(session_id)
+            
+            if not history:
+                # Check if session exists
+                session_stats = db_manager.get_session_stats_optimized(session_id)
+                if "error" in session_stats:
+                    raise HTTPException(status_code=404, detail="Session not found")
+            
+            return {
+                "success": True,
+                "session_id": session_id,
+                "history": history,
+                "message_count": len(history)
+            }
+            
     except HTTPException:
         raise
     except Exception as e:

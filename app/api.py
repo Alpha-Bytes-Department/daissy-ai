@@ -33,11 +33,6 @@ def get_or_create_chat_bot(session_id: Optional[str] = None) -> RAGChatBot:
     chat_bots[session_id] = chat_bot
     return chat_bot
 
-def cleanup_inactive_chat_bots():
-    """Remove chat bots that haven't been used recently to free memory"""
-    # This could be called periodically or when memory usage is high
-    # For now, we'll keep it simple and rely on explicit cleanup
-    pass
 
 # Pydantic models for request/response
 class ChatRequest(BaseModel):

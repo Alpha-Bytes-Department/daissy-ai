@@ -4,10 +4,10 @@ import uuid
 import os
 import shutil
 from typing import Dict, Any, Optional
-from pydantic import BaseModel
 from transcribe import AudioProcessor
 from chroma import ChromaDBManager
 from chat import SimpleChatBot, AudioProvider
+from schema import ChatRequest,SimpleChatResponse,AudioProviderRequest,AudioProviderResponse
 
 router = APIRouter()
 
@@ -36,24 +36,6 @@ def get_or_create_chat_bot(session_id: Optional[str] = None) -> SimpleChatBot:
     simple_chat_bots[session_id] = chat_bot
     return chat_bot
 
-
-# Pydantic models for request/response
-class ChatRequest(BaseModel):
-    query: str
-    session_id: Optional[str] = None
-
-class SimpleChatResponse(BaseModel):
-    response: str
-    query: str
-    conversation_length: int
-    session_id: str
-
-class AudioProviderRequest(BaseModel):
-    query: str
-
-class AudioProviderResponse(BaseModel):
-    query: str
-    audio_file: Optional[Dict[str, Any]]
 
 # Ensure uploads directory exists
 UPLOAD_DIR = "uploads"
@@ -198,7 +180,6 @@ async def get_audio_for_query(request: AudioProviderRequest) -> AudioProviderRes
     except HTTPException:
         raise HTTPException(status_code=500, detail=f"Audio chat failed: {str(e)}")
 
-
 @router.get("/chat/history/{session_id}")
 async def get_chat_history(session_id: str, include_metadata: bool = Query(False)) -> Dict[str, Any]:
     """
@@ -255,7 +236,7 @@ async def get_chat_history(session_id: str, include_metadata: bool = Query(False
 async def load_chat_session(session_id: str = Query(...)) -> Dict[str, Any]:
     """Load an existing chat session"""
     try:
-        chat_bot = get_or_create_chat_bot()
+        chat_bot = get_or_create_chat_bot(session_id)
         result = chat_bot.load_session(session_id)
         
         if result.get("success"):
@@ -265,68 +246,3 @@ async def load_chat_session(session_id: str = Query(...)) -> Dict[str, Any]:
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Session load failed: {str(e)}")
-
-@router.get("/health")
-async def health_check() -> Dict[str, str]:
-    """
-    Health check endpoint
-    """
-    return {"status": "healthy", "service": "audio-processing-api"}
-
-@router.get("/performance/stats")
-async def get_performance_stats() -> Dict[str, Any]:
-    """
-    Get performance statistics and system info
-    """
-    try:
-        from database import get_database_manager
-        db_manager = get_database_manager()
-        
-        # Get basic stats
-        simple_sessions = len(simple_chat_bots)
-        
-        # Get database connection pool info if available
-        pool_info = {}
-        if hasattr(db_manager.engine.pool, 'size'):
-            pool_info = {
-                "pool_size": db_manager.engine.pool.size(),
-                "checked_in": db_manager.engine.pool.checkedin(),
-                "checked_out": db_manager.engine.pool.checkedout(),
-                "overflow": db_manager.engine.pool.overflow(),
-            }
-        
-        return {
-            "success": True,
-            "active_sessions": {
-                "simple": simple_sessions,
-                "audio_provider": "stateless"
-            },
-            "cached_sessions": {
-                "simple": list(simple_chat_bots.keys())
-            },
-            "database_pool": pool_info,
-            "session_cache_size": len(db_manager._session_cache) if hasattr(db_manager, '_session_cache') else 0
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Performance stats failed: {str(e)}")
-
-@router.post("/performance/cleanup")
-async def cleanup_cache() -> Dict[str, Any]:
-    """Clean up cached chat bot sessions (admin endpoint)"""
-    try:
-        # Count before cleanup
-        simple_sessions_before = len(simple_chat_bots)
-        
-        # Clear chat bot caches
-        simple_chat_bots.clear()
-        
-        return {
-            "success": True,
-            "message": f"Cleaned up {simple_sessions_before} cached sessions",
-            "sessions_cleared": {
-                "simple": simple_sessions_before,
-                "audio_provider": "stateless - no cleanup needed"
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")

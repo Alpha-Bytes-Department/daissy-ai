@@ -62,7 +62,7 @@ class ChromaDBManager:
         except Exception as e:
             raise Exception(f"Error storing summary: {str(e)}")
     
-    def search_similar(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
+    def search_similar(self, query: str, n_results: int = 1) -> List[Dict[str, Any]]:
         """Search for similar summaries"""
         try:
             query_embeddings = self.get_embeddings(query)

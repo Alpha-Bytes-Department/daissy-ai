@@ -96,7 +96,7 @@ class SimpleChatBot:
             
             # Generate response without tools
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4.1-nano",
                 messages=messages,
                 temperature=0.7,
                 max_tokens=500
@@ -168,15 +168,44 @@ class AudioProvider:
     def __init__(self):
         # Initialize ChromaDB manager for audio search
         self.chroma_manager = ChromaDBManager()
+        # Initialize OpenAI client
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        if not os.getenv("OPENAI_API_KEY"):
+            raise ValueError("OPENAI_API_KEY environment variable is required")
+        
+        self.system_prompt_suggestions = "You are a helpful assistant."
     
-    def get_audio_for_message(self, user_query: str) -> Dict[str, Any]:
+    def _generate_suggestion(self, user_query: str) -> str:
+        try:
+            # Build messages with conversation history
+            messages = [{"role": "system", "content": self.system_prompt_suggestions}]
+            
+            # Add current user message
+            messages.append({"role": "user", "content": user_query})
+            
+            # Generate response without tools
+            response = self.client.chat.completions.create(
+                model="gpt-4.1-nano",
+                messages=messages,
+                temperature=0.7,
+                max_tokens=500
+            )
+            
+            ai_response = response.choices[0].message.content
+            return ai_response
+            
+        except Exception as e:
+            raise Exception(f"Chat error: {str(e)}")
+
+
+    def get_audio_and_suggestion(self, user_query: str) -> Dict[str, Any]:
         """Get the best matching audio file for a user message"""
         try:
             # Search for relevant audio
             audio_file = self._search_best_audio(user_query)
-            
+            suggestion = self._generate_suggestion(user_query)
             return {
-                "query": user_query,
+                "suggestion": suggestion,
                 "audio_file": audio_file
             }
             

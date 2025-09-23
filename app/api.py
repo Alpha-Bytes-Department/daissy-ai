@@ -170,10 +170,10 @@ async def get_audio_for_query(request: AudioProviderRequest) -> AudioProviderRes
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
         # Use the stateless audio provider
-        result = audio_provider.get_audio_for_message(request.query)
+        result = audio_provider.get_audio_and_suggestion(request.query)
         
         return AudioProviderResponse(
-            query=result["query"],
+            suggestion=result["suggestion"],
             audio_file=result["audio_file"]
         )
         

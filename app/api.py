@@ -112,29 +112,6 @@ async def upload_audio(file: UploadFile = File(...)) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
-@router.get("/audio/{audio_id}")
-async def get_audio_summary(audio_id: str) -> Dict[str, Any]:
-    """
-    Retrieve summary and metadata by audio ID
-    """
-    try:
-        result = chroma_manager.get_by_audio_id(audio_id)
-        
-        if not result:
-            raise HTTPException(status_code=404, detail="Audio summary not found")
-        
-        return {
-            "success": True,
-            "audio_id": audio_id,
-            "summary": result["document"],
-            "metadata": result["metadata"]
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Retrieval failed: {str(e)}")
-
 @router.post("/chat")
 async def simple_chat(request: ChatRequest) -> SimpleChatResponse:
     """

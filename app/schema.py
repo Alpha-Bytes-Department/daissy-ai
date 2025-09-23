@@ -17,4 +17,4 @@ class AudioProviderRequest(BaseModel):
 
 class AudioProviderResponse(BaseModel):
     suggestion: str
-    audio_file: Optional[Dict[str, Any]]
+    audio_file: str

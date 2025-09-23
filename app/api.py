@@ -174,7 +174,7 @@ async def get_audio_for_query(request: AudioProviderRequest) -> AudioProviderRes
         
         return AudioProviderResponse(
             suggestion=result["suggestion"],
-            audio_file=result["audio_file"]
+            audio_file=result["audio_file"]["audio_id"]
         )
         
     except HTTPException:

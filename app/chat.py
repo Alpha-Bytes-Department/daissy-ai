@@ -173,10 +173,11 @@ class AudioProvider:
         if not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY environment variable is required")
         
-        self.system_prompt_suggestions = "You are a helpful assistant."
-    
-    def _generate_suggestion(self, user_query: str) -> str:
+    def _generate_suggestion(self, user_query: str, summary: str) -> str:
         try:
+            self.system_prompt_suggestions = "You are a helpful assistant. " \
+            "Provide very short compassionate answer based on the context below:" \
+            f"{summary}" 
             # Build messages with conversation history
             messages = [{"role": "system", "content": self.system_prompt_suggestions}]
             
@@ -196,21 +197,6 @@ class AudioProvider:
             
         except Exception as e:
             raise Exception(f"Chat error: {str(e)}")
-
-
-    def get_audio_and_suggestion(self, user_query: str) -> Dict[str, Any]:
-        """Get the best matching audio file for a user message"""
-        try:
-            # Search for relevant audio
-            audio_file = self._search_best_audio(user_query)
-            suggestion = self._generate_suggestion(user_query)
-            return {
-                "suggestion": suggestion,
-                "audio_file": audio_file
-            }
-            
-        except Exception as e:
-            raise Exception(f"Audio provider error: {str(e)}")
     
     def _search_best_audio(self, user_query: str) -> Optional[Dict[str, Any]]:
         """Search for the most relevant audio file based on user query"""
@@ -249,8 +235,23 @@ class AudioProvider:
                                 }
                             break
             
-            return best_audio
+            return best_audio, doc # best audio and summary 
             
         except Exception as e:
             print(f"Warning: Could not search for audio: {e}")
             return None
+
+    def get_audio_and_suggestion(self, user_query: str) -> Dict[str, Any]:
+        """Get the best matching audio file for a user message"""
+        try:
+            # Search for relevant audio
+            audio_file, summary = self._search_best_audio(user_query)
+            suggestion = self._generate_suggestion(user_query, summary)
+            return {
+                "suggestion": suggestion,
+                "audio_file": audio_file
+            }
+            
+        except Exception as e:
+            raise Exception(f"Audio provider error: {str(e)}")
+    

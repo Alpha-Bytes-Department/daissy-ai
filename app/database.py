@@ -18,6 +18,7 @@ class ChatSession(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String(255), unique=True, index=True, nullable=False)
+    user_id = Column(String(255), nullable=True, index=True)  # Added user_id field
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_active = Column(Boolean, default=True)
@@ -27,6 +28,7 @@ class ChatMessage(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String(255), nullable=False, index=True)
+    user_id = Column(String(255), nullable=True, index=True)  # Added user_id field
     message_id = Column(String(255), unique=True, index=True, nullable=False)
     role = Column(String(50), nullable=False)  # 'user' or 'assistant'
     content = Column(Text, nullable=False)
@@ -73,7 +75,7 @@ class DatabaseManager:
         finally:
             db.close()
     
-    def create_chat_session_if_not_exists(self, session_id: str) -> bool:
+    def create_chat_session_if_not_exists(self, session_id: str, user_id: Optional[str] = None) -> bool:
         """Create a new chat session only if it doesn't exist. Returns True if created, False if exists."""
         # Check cache first
         if session_id in self._session_cache:
@@ -86,7 +88,7 @@ class DatabaseManager:
                 self._session_cache.add(session_id)
                 return False
             
-            chat_session = ChatSession(session_id=session_id)
+            chat_session = ChatSession(session_id=session_id, user_id=user_id)
             db.add(chat_session)
             self._session_cache.add(session_id)
             return True
@@ -98,11 +100,13 @@ class DatabaseManager:
             for msg_data in messages_data:
                 # Ensure session exists (but only check once per batch)
                 session_id = msg_data["session_id"]
+                user_id = msg_data.get("user_id")
                 if session_id not in self._session_cache:
-                    self.create_chat_session_if_not_exists(session_id)
+                    self.create_chat_session_if_not_exists(session_id, user_id)
                 
                 message = ChatMessage(
                     session_id=msg_data["session_id"],
+                    user_id=user_id,
                     message_id=msg_data["message_id"],
                     role=msg_data["role"],
                     content=msg_data["content"],
@@ -115,6 +119,7 @@ class DatabaseManager:
                 # Convert to dict immediately to avoid detached instance issues
                 saved_messages.append({
                     "session_id": message.session_id,
+                    "user_id": message.user_id,
                     "message_id": message.message_id,
                     "role": message.role,
                     "content": message.content,
@@ -126,12 +131,14 @@ class DatabaseManager:
             return saved_messages
     
     def save_message(self, session_id: str, message_id: str, role: str, content: str, 
+                    user_id: Optional[str] = None,
                     audio_files: Optional[List[Dict]] = None, 
                     function_calls: Optional[List[Dict]] = None,
                     extra_data: Optional[Dict] = None) -> Dict[str, Any]:
         """Save a single chat message to the database - returns dict data"""
         return self.save_messages_batch([{
             "session_id": session_id,
+            "user_id": user_id,
             "message_id": message_id,
             "role": role,
             "content": content,
@@ -159,6 +166,7 @@ class DatabaseManager:
                 {
                     "id": msg.id,
                     "session_id": msg.session_id,
+                    "user_id": msg.user_id,
                     "message_id": msg.message_id,
                     "role": msg.role,
                     "content": msg.content,
@@ -217,6 +225,7 @@ class DatabaseManager:
             
             result = db.query(
                 ChatSession.session_id,
+                ChatSession.user_id,
                 ChatSession.created_at,
                 ChatSession.updated_at,
                 ChatSession.is_active,
@@ -228,7 +237,7 @@ class DatabaseManager:
             ).filter(
                 ChatSession.session_id == session_id
             ).group_by(
-                ChatSession.id, ChatSession.session_id, ChatSession.created_at, 
+                ChatSession.id, ChatSession.session_id, ChatSession.user_id, ChatSession.created_at, 
                 ChatSession.updated_at, ChatSession.is_active
             ).first()
             
@@ -237,6 +246,7 @@ class DatabaseManager:
             
             return {
                 "session_id": result.session_id,
+                "user_id": result.user_id,
                 "created_at": result.created_at,
                 "updated_at": result.updated_at,
                 "is_active": result.is_active,
@@ -244,6 +254,33 @@ class DatabaseManager:
                 "first_message_time": result.first_message_time,
                 "last_message_time": result.last_message_time
             }
+    
+    def get_user_sessions(self, user_id: str, active_only: bool = True) -> List[Dict[str, Any]]:
+        """Get all sessions for a specific user"""
+        with self.get_db_session() as db:
+            query = db.query(ChatSession).filter(ChatSession.user_id == user_id)
+            
+            if active_only:
+                query = query.filter(ChatSession.is_active == True)
+            
+            sessions = query.order_by(ChatSession.updated_at.desc()).all()
+            
+            return [
+                {
+                    "id": session.id,
+                    "session_id": session.session_id,
+                    "user_id": session.user_id,
+                    "created_at": session.created_at,
+                    "updated_at": session.updated_at,
+                    "is_active": session.is_active
+                }
+                for session in sessions
+            ]
+    
+    def get_user_message_count(self, user_id: str) -> int:
+        """Get total message count for a user across all sessions"""
+        with self.get_db_session() as db:
+            return db.query(ChatMessage).filter(ChatMessage.user_id == user_id).count()
     
     # Keep the old method for backward compatibility
     def get_session_stats(self, session_id: str) -> Dict[str, Any]:

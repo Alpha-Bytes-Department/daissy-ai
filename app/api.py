@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 from transcribe import AudioProcessor
 from chroma import ChromaDBManager
 from chat import SimpleChatBot, AudioProvider
-from schema import ChatRequest,SimpleChatResponse,AudioProviderRequest,AudioProviderResponse
+from schema import ChatRequest,SimpleChatResponse,AudioProviderRequest,AudioProviderResponse,UserSessionsResponse
 
 router = APIRouter()
 
@@ -113,7 +113,7 @@ async def upload_audio(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @router.post("/chat")
-async def simple_chat(request: ChatRequest) -> SimpleChatResponse:
+async def chat(request: ChatRequest) -> SimpleChatResponse:
     """
     Simple text-based chat with AI assistant - no audio functionality.
     """
@@ -223,3 +223,84 @@ async def load_chat_session(session_id: str = Query(...)) -> Dict[str, Any]:
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Session load failed: {str(e)}")
+
+@router.get("/user/{user_id}/sessions")
+async def get_user_sessions(
+    user_id: str, 
+    active_only: bool = Query(True, description="Only return active sessions"),
+    include_message_count: bool = Query(False, description="Include total message count for user")
+) -> Dict[str, Any]:
+    """Get all sessions for a specific user"""
+    try:
+        from database import get_database_manager
+        db_manager = get_database_manager()
+        
+        # Get user sessions
+        sessions = db_manager.get_user_sessions(user_id, active_only=active_only)
+        
+        # Optionally get message count
+        message_count = None
+        if include_message_count:
+            message_count = db_manager.get_user_message_count(user_id)
+        
+        # Convert datetime objects to strings for JSON serialization
+        formatted_sessions = []
+        for session in sessions:
+            formatted_session = {
+                "id": session["id"],
+                "session_id": session["session_id"],
+                "user_id": session["user_id"],
+                "created_at": session["created_at"].isoformat() if session["created_at"] else None,
+                "updated_at": session["updated_at"].isoformat() if session["updated_at"] else None,
+                "is_active": session["is_active"]
+            }
+            formatted_sessions.append(formatted_session)
+        
+        return {
+            "success": True,
+            "user_id": user_id,
+            "sessions": formatted_sessions,
+            "total_sessions": len(formatted_sessions),
+            "message_count": message_count
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve user sessions: {str(e)}")
+
+@router.delete("/user/{user_id}/sessions/{session_id}")
+async def delete_user_session(user_id: str, session_id: str) -> Dict[str, Any]:
+    """Delete a specific session for a user (with user verification)"""
+    try:
+        from database import get_database_manager
+        db_manager = get_database_manager()
+        
+        # First verify the session belongs to the user
+        with db_manager.get_db_session() as db:
+            from database import ChatSession
+            session = db.query(ChatSession).filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == user_id
+            ).first()
+            
+            if not session:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="Session not found or does not belong to the specified user"
+                )
+        
+        # Delete the session
+        success = db_manager.delete_session(session_id)
+        
+        # Clean up from active chat bots cache
+        if session_id in simple_chat_bots:
+            del simple_chat_bots[session_id]
+        
+        return {
+            "success": success,
+            "message": f"Session {session_id} deleted successfully" if success else "Failed to delete session"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")

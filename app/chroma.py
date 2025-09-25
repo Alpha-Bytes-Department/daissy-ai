@@ -4,7 +4,7 @@ import openai
 import os
 from typing import List, Dict, Any
 from dotenv import load_dotenv
-
+from datetime import datetime
 load_dotenv()
 
 class ChromaDBManager:
@@ -33,7 +33,7 @@ class ChromaDBManager:
             return response.data[0].embedding
         except Exception as e:
             raise Exception(f"Error generating embeddings: {str(e)}")
-    
+         
     def store_summary(self, audio_id: str, summary: str, transcription: str = None) -> str:
         """Store summary with embeddings in ChromaDB"""
         try:
@@ -61,7 +61,7 @@ class ChromaDBManager:
             return audio_id
         except Exception as e:
             raise Exception(f"Error storing summary: {str(e)}")
-    
+        
     def search_similar(self, query: str, n_results: int = 1) -> List[Dict[str, Any]]:
         """Search for similar summaries"""
         try:

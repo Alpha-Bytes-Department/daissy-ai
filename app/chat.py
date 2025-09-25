@@ -110,10 +110,6 @@ class SimpleChatBot:
         except Exception as e:
             raise Exception(f"Chat error: {str(e)}")
     
-    def get_conversation_length(self) -> int:
-        """Get the current conversation length"""
-        return len(self.conversation_history)
-    
     def get_user_stats(self) -> Dict[str, Any]:
         """Get detailed user statistics (optimized version)"""
         try:

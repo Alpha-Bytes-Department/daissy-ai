@@ -22,11 +22,6 @@ class ChatMessage(Base):
     role = Column(String(50), nullable=False)  # 'user' or 'assistant'
     content = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow)
-    
-    # Additional fields for storing context
-    audio_files = Column(JSON, nullable=True)  # Store audio file information if any
-    function_calls = Column(JSON, nullable=True)  # Store function call data if any
-    extra_data = Column(JSON, nullable=True)  # Store any additional metadata
 
 class DatabaseManager:
     def __init__(self):
@@ -61,20 +56,14 @@ class DatabaseManager:
         finally:
             db.close()
     
-    def save_message(self, user_id: str, message_id: str, role: str, content: str, 
-                    audio_files: Optional[List[Dict]] = None, 
-                    function_calls: Optional[List[Dict]] = None,
-                    extra_data: Optional[Dict] = None) -> Dict[str, Any]:
+    def save_message(self, user_id: str, message_id: str, role: str, content: str) -> Dict[str, Any]:
         """Save a single chat message to the database - returns dict data"""
         with self.get_db_session() as db:
             message = ChatMessage(
                 user_id=user_id,
                 message_id=message_id,
                 role=role,
-                content=content,
-                audio_files=audio_files,
-                function_calls=function_calls,
-                extra_data=extra_data
+                content=content
             )
             db.add(message)
             
@@ -83,10 +72,7 @@ class DatabaseManager:
                 "user_id": message.user_id,
                 "message_id": message.message_id,
                 "role": message.role,
-                "content": message.content,
-                "audio_files": message.audio_files,
-                "function_calls": message.function_calls,
-                "extra_data": message.extra_data
+                "content": message.content
             }
     
     def get_user_messages(self, user_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -111,10 +97,7 @@ class DatabaseManager:
                     "message_id": msg.message_id,
                     "role": msg.role,
                     "content": msg.content,
-                    "timestamp": msg.timestamp,
-                    "audio_files": msg.audio_files,
-                    "function_calls": msg.function_calls,
-                    "extra_data": msg.extra_data
+                    "timestamp": msg.timestamp
                 }
                 for msg in messages
             ]

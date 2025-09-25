@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 from transcribe import AudioProcessor
 from chroma import ChromaDBManager
 from chat import SimpleChatBot, AudioProvider
-from schema import ChatRequest,SimpleChatResponse,AudioProviderRequest,AudioProviderResponse,UserSessionsResponse
+from schema import ChatRequest,SimpleChatResponse,AudioProviderRequest,AudioProviderResponse
 
 router = APIRouter()
 
@@ -21,19 +21,15 @@ simple_chat_bots = {}
 # Create a single audio provider instance since it's stateless
 audio_provider = AudioProvider()
 
-def get_or_create_chat_bot(session_id: Optional[str] = None) -> SimpleChatBot:
-    """Get existing simple chat bot for session or create new one"""
-    if session_id is None:
-        # Create new session without caching (one-time use)
-        return SimpleChatBot()
-    
+def get_or_create_chat_bot(user_id: str) -> SimpleChatBot:
+    """Get existing simple chat bot for user or create new one"""
     # Check if we already have this chat bot in memory
-    if session_id in simple_chat_bots:
-        return simple_chat_bots[session_id]
+    if user_id in simple_chat_bots:
+        return simple_chat_bots[user_id]
     
     # Create new chat bot and cache it
-    chat_bot = SimpleChatBot(session_id=session_id)
-    simple_chat_bots[session_id] = chat_bot
+    chat_bot = SimpleChatBot(user_id=user_id)
+    simple_chat_bots[user_id] = chat_bot
     return chat_bot
 
 
@@ -121,8 +117,11 @@ async def chat(request: ChatRequest) -> SimpleChatResponse:
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
-        # Get or create simple chat bot for session
-        chat_bot = get_or_create_chat_bot(request.session_id)
+        if not request.user_id:
+            raise HTTPException(status_code=400, detail="User ID is required")
+        
+        # Get or create simple chat bot for user
+        chat_bot = get_or_create_chat_bot(request.user_id)
         
         # Get chat response
         chat_result = chat_bot.chat(request.query)
@@ -131,7 +130,7 @@ async def chat(request: ChatRequest) -> SimpleChatResponse:
             response=chat_result["response"],
             query=chat_result["query"],
             conversation_length=chat_result["conversation_length"],
-            session_id=chat_result["session_id"]
+            user_id=chat_result["user_id"]
         )
         
     except HTTPException:
@@ -151,156 +150,62 @@ async def get_audio_for_query(request: AudioProviderRequest) -> AudioProviderRes
         
         return AudioProviderResponse(
             suggestion=result["suggestion"],
-            audio_file=result["audio_file"]["audio_id"]
+            audio_file=UPLOAD_DIR+"/"+result["audio_file"]["filename"]
         )
         
     except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Audio chat failed: {str(e)}")
 
-@router.get("/chat/history/{session_id}")
-async def get_chat_history(session_id: str, include_metadata: bool = Query(False)) -> Dict[str, Any]:
+@router.get("/chat/history/{user_id}")
+async def get_chat_history(user_id: str) -> Dict[str, Any]:
     """
-    Get the complete chat history for a session - optimized to use direct DB query
+    Get the complete chat history for a user - optimized to use direct DB query
     """
     try:
         # Get history directly from database without loading full chat bot
         from database import get_database_manager
         db_manager = get_database_manager()
         
-        if include_metadata:
-            # Get full message details including metadata
-            messages = db_manager.get_full_session_messages(session_id)
-            
-            if not messages:
-                # Check if session exists
-                session_stats = db_manager.get_session_stats_optimized(session_id)
-                if "error" in session_stats:
-                    raise HTTPException(status_code=404, detail="Session not found")
-            
-            # Convert to chat history format for API response
-            history = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
-            
-            return {
-                "success": True,
-                "session_id": session_id,
-                "history": history,
-                "full_messages": messages,  # Include full message data with metadata
-                "message_count": len(messages)
-            }
-        else:
-            # Get simple chat history (role, content only)
-            history = db_manager.get_session_history(session_id)
-            
-            if not history:
-                # Check if session exists
-                session_stats = db_manager.get_session_stats_optimized(session_id)
-                if "error" in session_stats:
-                    raise HTTPException(status_code=404, detail="Session not found")
-            
-            return {
-                "success": True,
-                "session_id": session_id,
-                "history": history,
-                "message_count": len(history)
-            }
+        # Get simple chat history (role, content only)
+        history = db_manager.get_user_history(user_id)
+        
+        if not history:
+            # Check if user has any conversation
+            user_stats = db_manager.get_user_stats(user_id)
+            if user_stats["message_count"] == 0:
+                raise HTTPException(status_code=404, detail="No conversation found for user")
+        
+        return {
+            "history": history
+        }
             
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"History retrieval failed: {str(e)}")
 
-@router.post("/chat/load-session")
-async def load_chat_session(session_id: str = Query(...)) -> Dict[str, Any]:
-    """Load an existing chat session"""
-    try:
-        chat_bot = get_or_create_chat_bot(session_id)
-        result = chat_bot.load_session(session_id)
-        
-        if result.get("success"):
-            # Store in active chat bots
-            simple_chat_bots[session_id] = chat_bot
-        
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Session load failed: {str(e)}")
-
-@router.get("/user/{user_id}/sessions")
-async def get_user_sessions(
-    user_id: str, 
-    active_only: bool = Query(True, description="Only return active sessions"),
-    include_message_count: bool = Query(False, description="Include total message count for user")
-) -> Dict[str, Any]:
-    """Get all sessions for a specific user"""
+@router.delete("/delete/conversation")
+async def delete_user_conversation(user_id: str) -> Dict[str, Any]:
+    """Delete the entire conversation for a user"""
     try:
         from database import get_database_manager
         db_manager = get_database_manager()
         
-        # Get user sessions
-        sessions = db_manager.get_user_sessions(user_id, active_only=active_only)
-        
-        # Optionally get message count
-        message_count = None
-        if include_message_count:
-            message_count = db_manager.get_user_message_count(user_id)
-        
-        # Convert datetime objects to strings for JSON serialization
-        formatted_sessions = []
-        for session in sessions:
-            formatted_session = {
-                "id": session["id"],
-                "session_id": session["session_id"],
-                "user_id": session["user_id"],
-                "created_at": session["created_at"].isoformat() if session["created_at"] else None,
-                "updated_at": session["updated_at"].isoformat() if session["updated_at"] else None,
-                "is_active": session["is_active"]
-            }
-            formatted_sessions.append(formatted_session)
-        
-        return {
-            "success": True,
-            "user_id": user_id,
-            "sessions": formatted_sessions,
-            "total_sessions": len(formatted_sessions),
-            "message_count": message_count
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve user sessions: {str(e)}")
-
-@router.delete("/user/{user_id}/sessions/{session_id}")
-async def delete_user_session(user_id: str, session_id: str) -> Dict[str, Any]:
-    """Delete a specific session for a user (with user verification)"""
-    try:
-        from database import get_database_manager
-        db_manager = get_database_manager()
-        
-        # First verify the session belongs to the user
-        with db_manager.get_db_session() as db:
-            from database import ChatSession
-            session = db.query(ChatSession).filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == user_id
-            ).first()
-            
-            if not session:
-                raise HTTPException(
-                    status_code=404, 
-                    detail="Session not found or does not belong to the specified user"
-                )
-        
-        # Delete the session
-        success = db_manager.delete_session(session_id)
+        # Delete all messages for the user
+        success = db_manager.delete_user_conversation(user_id)
         
         # Clean up from active chat bots cache
-        if session_id in simple_chat_bots:
-            del simple_chat_bots[session_id]
+        if user_id in simple_chat_bots:
+            del simple_chat_bots[user_id]
         
         return {
             "success": success,
-            "message": f"Session {session_id} deleted successfully" if success else "Failed to delete session"
+            "message": f"Conversation for user {user_id} deleted successfully" if success else "No conversation found to delete"
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete conversation: {str(e)}")

@@ -9,29 +9,20 @@ from database import get_database_manager
 load_dotenv()
 
 class SimpleChatBot:
-    def __init__(self, session_id: Optional[str] = None):
+    def __init__(self, user_id: str):
         # Initialize OpenAI client
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         if not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY environment variable is required")
-        
-        # Initialize ChromaDB manager
-        self.chroma_manager = ChromaDBManager()
+    
+        # Store user_id for conversation management
+        self.user_id = user_id
         
         # Initialize database manager for persistent storage
         self.db_manager = get_database_manager()
-        
-        # Session management
-        self.session_id = session_id or str(uuid.uuid4())
-        
-        # Create session in database if it doesn't exist (optimized)
-        self.db_manager.create_chat_session_if_not_exists(self.session_id)
-        
+         
         # Store conversation history for continuity (loaded from database)
         self.conversation_history = self._load_conversation_history()
-        
-        # Cache for pending messages to batch database writes
-        self._pending_messages = []
         
         # System prompt for the simple chat AI
         self.system_prompt = """You are a helpful and professional AI assistant that provides guidance and support through text-based conversations.
@@ -52,34 +43,27 @@ class SimpleChatBot:
         """Load conversation history from database"""
         try:
             # Load recent conversation history (last 10 messages for context)
-            return self.db_manager.get_session_history(self.session_id, limit=10)
+            return self.db_manager.get_user_history(self.user_id, limit=10)
         except Exception as e:
             print(f"Warning: Could not load conversation history: {e}")
             return []
     
     def _save_message_to_db(self, role: str, content: str) -> None:
-        """Queue a message for batch saving to the database"""
-        message_id = str(uuid.uuid4())
-        self._pending_messages.append({
-            "session_id": self.session_id,
-            "message_id": message_id,
-            "role": role,
-            "content": content
-        })
+        """Save a single message to database immediately"""
+        try:
+            message_id = str(uuid.uuid4())
+            self.db_manager.save_message(
+                user_id=self.user_id,
+                message_id=message_id,
+                role=role,
+                content=content
+            )
+        except Exception as e:
+            print(f"Warning: Could not save message to database: {e}")
     
-    def _flush_pending_messages(self) -> None:
-        """Save all pending messages to database in a single batch operation"""
-        if self._pending_messages:
-            try:
-                self.db_manager.save_messages_batch(self._pending_messages)
-                self._pending_messages.clear()
-            except Exception as e:
-                print(f"Warning: Could not save messages to database: {e}")
-                self._pending_messages.clear()  # Clear to prevent memory buildup
-    
-    def get_session_id(self) -> str:
-        """Get the current session ID"""
-        return self.session_id
+    def get_user_id(self) -> str:
+        """Get the current user ID"""
+        return self.user_id
     
     def chat(self, user_query: str) -> Dict[str, Any]:
         """Simple chat function for text-only conversations"""
@@ -104,22 +88,23 @@ class SimpleChatBot:
             
             ai_response = response.choices[0].message.content
             
-            # Store this interaction in conversation history
-            self.conversation_history.append({"role": "user", "content": user_query})
-            self.conversation_history.append({"role": "assistant", "content": ai_response})
-            
-            # Queue messages for batch database save
+            # Save user message to database immediately
             self._save_message_to_db("user", user_query)
+            
+            # Store user message in conversation history
+            self.conversation_history.append({"role": "user", "content": user_query})
+            
+            # Save assistant response to database immediately
             self._save_message_to_db("assistant", ai_response)
             
-            # Flush pending messages to database
-            self._flush_pending_messages()
+            # Store assistant response in conversation history
+            self.conversation_history.append({"role": "assistant", "content": ai_response})
             
             return {
                 "response": ai_response,
                 "query": user_query,
                 "conversation_length": len(self.conversation_history),
-                "session_id": self.session_id
+                "user_id": self.user_id
             }
             
         except Exception as e:
@@ -129,37 +114,17 @@ class SimpleChatBot:
         """Get the current conversation length"""
         return len(self.conversation_history)
     
-    def get_session_stats(self) -> Dict[str, Any]:
-        """Get detailed session statistics (optimized version)"""
+    def get_user_stats(self) -> Dict[str, Any]:
+        """Get detailed user statistics (optimized version)"""
         try:
-            return self.db_manager.get_session_stats_optimized(self.session_id)
+            return self.db_manager.get_user_stats(self.user_id)
         except Exception as e:
-            return {"error": f"Could not retrieve session stats: {e}"}
-    
-    def load_session(self, session_id: str) -> Dict[str, Any]:
-        """Load an existing session"""
-        try:
-            # Flush any pending messages from current session
-            self._flush_pending_messages()
-            
-            self.session_id = session_id
-            self.conversation_history = self._load_conversation_history()
-            return {
-                "success": True,
-                "session_id": session_id,
-                "conversation_length": len(self.conversation_history),
-                "message": f"Loaded session {session_id}"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Could not load session: {e}"
-            }
+            return {"error": f"Could not retrieve user stats: {e}"}
     
     def get_full_conversation_history(self) -> List[Dict[str, Any]]:
-        """Get the complete conversation history for the current session"""
+        """Get the complete conversation history for the current user"""
         try:
-            return self.db_manager.get_full_session_messages(self.session_id)
+            return self.db_manager.get_full_user_messages(self.user_id)
         except Exception as e:
             print(f"Warning: Could not retrieve full conversation history: {e}")
             return []

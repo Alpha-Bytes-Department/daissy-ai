@@ -34,25 +34,6 @@ app.add_middleware(
 # Include API routes
 app.include_router(router, prefix="/api/v1", tags=["audio"])
 
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "message": "Audio Processing & Consultation Finder API",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "health": "/api/v1/health",
-        "endpoints": {
-            "upload_audio": "/api/v1/upload-audio",
-            "search": "/api/v1/search",
-            "chat": "/api/v1/chat",
-            "chat_reset": "/api/v1/chat/reset",
-            "chat_status": "/api/v1/chat/status",
-            "download_audio": "/api/v1/download-audio/{audio_id}",
-            "get_audio": "/api/v1/audio/{audio_id}"
-        }
-    }
-
 if __name__ == "__main__":
     import uvicorn
     

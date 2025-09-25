@@ -7,7 +7,6 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
 from contextlib import contextmanager
 from dotenv import load_dotenv
-import json
 
 load_dotenv()
 
@@ -107,11 +106,6 @@ class DatabaseManager:
         messages = self.get_user_messages(user_id, limit)
         
         return [{"role": msg["role"], "content": msg["content"]} for msg in messages]
-    
-    def get_full_user_messages(self, user_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get complete message data including metadata for a user - returns full message details"""
-        messages = self.get_user_messages(user_id, limit)
-        return messages  # Already converted to dict format with all fields
     
     def delete_user_conversation(self, user_id: str) -> bool:
         """Delete all messages for a user"""

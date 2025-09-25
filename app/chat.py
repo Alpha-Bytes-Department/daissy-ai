@@ -124,7 +124,7 @@ class SimpleChatBot:
     def get_full_conversation_history(self) -> List[Dict[str, Any]]:
         """Get the complete conversation history for the current user"""
         try:
-            return self.db_manager.get_full_user_messages(self.user_id)
+            return self.db_manager.get_user_history(self.user_id)
         except Exception as e:
             print(f"Warning: Could not retrieve full conversation history: {e}")
             return []

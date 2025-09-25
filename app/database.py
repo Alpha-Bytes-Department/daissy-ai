@@ -61,48 +61,33 @@ class DatabaseManager:
         finally:
             db.close()
     
-    def save_messages_batch(self, user_id: str, messages_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Save multiple messages in a single transaction - returns dict data to avoid detached instances"""
-        with self.get_db_session() as db:
-            saved_messages = []
-            for msg_data in messages_data:
-                message = ChatMessage(
-                    user_id=user_id,
-                    message_id=msg_data["message_id"],
-                    role=msg_data["role"],
-                    content=msg_data["content"],
-                    audio_files=msg_data.get("audio_files"),
-                    function_calls=msg_data.get("function_calls"),
-                    extra_data=msg_data.get("extra_data")
-                )
-                db.add(message)
-                
-                # Convert to dict immediately to avoid detached instance issues
-                saved_messages.append({
-                    "user_id": message.user_id,
-                    "message_id": message.message_id,
-                    "role": message.role,
-                    "content": message.content,
-                    "audio_files": message.audio_files,
-                    "function_calls": message.function_calls,
-                    "extra_data": message.extra_data
-                })
-            
-            return saved_messages
-    
     def save_message(self, user_id: str, message_id: str, role: str, content: str, 
                     audio_files: Optional[List[Dict]] = None, 
                     function_calls: Optional[List[Dict]] = None,
                     extra_data: Optional[Dict] = None) -> Dict[str, Any]:
         """Save a single chat message to the database - returns dict data"""
-        return self.save_messages_batch(user_id, [{
-            "message_id": message_id,
-            "role": role,
-            "content": content,
-            "audio_files": audio_files,
-            "function_calls": function_calls,
-            "extra_data": extra_data
-        }])[0]
+        with self.get_db_session() as db:
+            message = ChatMessage(
+                user_id=user_id,
+                message_id=message_id,
+                role=role,
+                content=content,
+                audio_files=audio_files,
+                function_calls=function_calls,
+                extra_data=extra_data
+            )
+            db.add(message)
+            
+            # Convert to dict immediately to avoid detached instance issues
+            return {
+                "user_id": message.user_id,
+                "message_id": message.message_id,
+                "role": message.role,
+                "content": message.content,
+                "audio_files": message.audio_files,
+                "function_calls": message.function_calls,
+                "extra_data": message.extra_data
+            }
     
     def get_user_messages(self, user_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get all messages for a user, optionally limited to recent messages - returns dict data"""

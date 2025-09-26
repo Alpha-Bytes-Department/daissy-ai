@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 from transcribe import AudioProcessor
 from chroma import ChromaDBManager
 from chat import SimpleChatBot, AudioProvider
-from schema import ChatRequest,SimpleChatResponse,AudioProviderRequest,AudioProviderResponse
+from schema import ChatRequest,SimpleChatResponse,AudioProviderRequest,AudioProviderResponse,ChatHistoryResponse
 
 router = APIRouter()
 
@@ -158,27 +158,37 @@ async def get_audio_for_query(request: AudioProviderRequest) -> AudioProviderRes
         raise HTTPException(status_code=500, detail=f"Audio chat failed: {str(e)}")
 
 @router.get("/chat/history/{user_id}")
-async def get_chat_history(user_id: str) -> Dict[str, Any]:
+async def get_chat_history(
+    user_id: str, 
+    page: int = Query(1, ge=1, description="Page number (starts from 1)"),
+    limit: int = Query(20, ge=1, le=100, description="Number of messages per page (max 100)")
+) -> ChatHistoryResponse:
     """
-    Get the complete chat history for a user - optimized to use direct DB query
+    Get paginated chat history for a user - optimized to use direct DB query
     """
     try:
         # Get history directly from database without loading full chat bot
         from database import get_database_manager
         db_manager = get_database_manager()
         
-        # Get simple chat history (role, content only)
-        history = db_manager.get_user_history(user_id)
+        # Get paginated chat history
+        result = db_manager.get_user_history_paginated(user_id, page, limit)
         
-        if not history:
-            # Check if user has any conversation
-            user_stats = db_manager.get_user_stats(user_id)
-            if user_stats["message_count"] == 0:
-                raise HTTPException(status_code=404, detail="No conversation found for user")
+        # Check if user exists but has no messages
+        if result["pagination"]["total_messages"] == 0:
+            raise HTTPException(status_code=404, detail="No conversation found for user")
         
-        return {
-            "history": history
-        }
+        # Check if page is out of range
+        if page > result["pagination"]["total_pages"]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Page {page} not found. Total pages: {result['pagination']['total_pages']}"
+            )
+        
+        return ChatHistoryResponse(
+            history=result["history"],
+            pagination=result["pagination"]
+        )
             
     except HTTPException:
         raise

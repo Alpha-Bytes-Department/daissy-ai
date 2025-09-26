@@ -107,6 +107,40 @@ class DatabaseManager:
         
         return [{"role": msg["role"], "content": msg["content"]} for msg in messages]
     
+    def get_user_history_paginated(self, user_id: str, page: int = 1, limit: int = 20) -> Dict[str, Any]:
+        """Get paginated user conversation history with pagination metadata"""
+        with self.get_db_session() as db:
+            # Calculate offset
+            offset = (page - 1) * limit
+            
+            # Get total count for pagination metadata
+            total_count = db.query(ChatMessage).filter(ChatMessage.user_id == user_id).count()
+            
+            # Get paginated messages
+            messages = db.query(ChatMessage).filter(
+                ChatMessage.user_id == user_id
+            ).order_by(ChatMessage.timestamp.asc()).offset(offset).limit(limit).all()
+            
+            # Convert to chat format
+            history = [{"role": msg.role, "content": msg.content} for msg in messages]
+            
+            # Calculate pagination metadata
+            total_pages = (total_count + limit - 1) // limit  # Ceiling division
+            has_next = page < total_pages
+            has_previous = page > 1
+            
+            return {
+                "history": history,
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total_messages": total_count,
+                    "total_pages": total_pages,
+                    "has_next": has_next,
+                    "has_previous": has_previous
+                }
+            }
+    
     def delete_user_conversation(self, user_id: str) -> bool:
         """Delete all messages for a user"""
         with self.get_db_session() as db:

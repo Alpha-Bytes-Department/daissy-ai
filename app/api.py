@@ -32,7 +32,6 @@ def get_or_create_chat_bot(user_id: str) -> SimpleChatBot:
     simple_chat_bots[user_id] = chat_bot
     return chat_bot
 
-
 # Ensure uploads directory exists
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)

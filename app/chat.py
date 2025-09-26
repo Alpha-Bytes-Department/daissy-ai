@@ -3,8 +3,8 @@ import uuid
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from openai import OpenAI
-from chroma import ChromaDBManager
-from database import get_database_manager
+from .chroma import ChromaDBManager
+from .database import get_database_manager
 
 load_dotenv()
 

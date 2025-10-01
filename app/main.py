@@ -25,14 +25,14 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure this properly for production
+    allow_origins=["http://10.10.12.63"],  # Configure this properly for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Include API routes
-app.include_router(router, prefix="/api/v1", tags=["audio"])
+app.include_router(router, prefix="/ai", tags=["audio"])
 
 if __name__ == "__main__":
     import uvicorn
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     
     uvicorn.run(
         "app.main:app",
-        host="127.0.0.1",
+        host="0.0.0.0",
         port=8000,
         reload=True
     )

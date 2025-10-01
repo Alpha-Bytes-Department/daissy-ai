@@ -157,7 +157,7 @@ async def get_audio_for_query(request: AudioProviderRequest) -> AudioProviderRes
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Audio chat failed: {str(e)}")
 
-@router.get("/chat/history/{user_id}")
+@router.get("/chat/history")
 async def get_chat_history(
     user_id: str, 
     page: int = Query(1, ge=1, description="Page number (starts from 1)"),

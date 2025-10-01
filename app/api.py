@@ -138,14 +138,14 @@ async def chat(request: ChatRequest) -> SimpleChatResponse:
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
 @router.post("/chat-audio")
-async def get_audio_for_query(request: AudioProviderRequest) -> AudioProviderResponse:
+async def get_audio_for_query(query: str) -> AudioProviderResponse:
     """Get relevant audio file for user query"""
     try:
-        if not request.query.strip():
+        if not query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
         # Use the stateless audio provider
-        result = audio_provider.get_audio_and_suggestion(request.query)
+        result = audio_provider.get_audio_and_suggestion(query)
         
         return AudioProviderResponse(
             suggestion=result["suggestion"],

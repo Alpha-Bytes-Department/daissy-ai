@@ -108,22 +108,22 @@ async def upload_audio(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @router.post("/chat")
-async def chat(request: ChatRequest) -> SimpleChatResponse:
+async def chat(query: str, user_id: str) -> SimpleChatResponse:
     """
     Simple text-based chat with AI assistant - no audio functionality.
     """
     try:
-        if not request.query.strip():
+        if not query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
-        if not request.user_id:
+        if not user_id:
             raise HTTPException(status_code=400, detail="User ID is required")
         
         # Get or create simple chat bot for user
-        chat_bot = get_or_create_chat_bot(request.user_id)
+        chat_bot = get_or_create_chat_bot(user_id)
         
         # Get chat response
-        chat_result = chat_bot.chat(request.query)
+        chat_result = chat_bot.chat(query)
         
         return SimpleChatResponse(
             response=chat_result["response"],

@@ -25,7 +25,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://10.10.12.63"],  # Configure this properly for production
+    allow_origins=["*"],  # Allow all origins for LAN development - restrict for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

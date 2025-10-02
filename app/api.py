@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 from transcribe import AudioProcessor
 from chroma import ChromaDBManager
 from chat import SimpleChatBot, AudioProvider
-from schema import ChatRequest,SimpleChatResponse,AudioProviderRequest,AudioProviderResponse,ChatHistoryResponse
+from schema import SimpleChatResponse,AudioProviderResponse,ChatHistoryResponse,AudioListResponse,AudioItem,AudioMetadata
 
 router = APIRouter()
 
@@ -82,6 +82,7 @@ async def upload_audio(
         
         # Process the audio file
         try:
+            duration = audio_processor.get_media_duration(file_path)
             transcription, summary = audio_processor.process_audio(file_path)
         except Exception as e:
             # Clean up the uploaded file if processing fails
@@ -91,7 +92,7 @@ async def upload_audio(
         
         # Store summary in ChromaDB
         try:
-            stored_id = chroma_manager.store_summary(audio_id, summary, title, category, use_case, emotion)
+            chroma_manager.store_summary(audio_id, summary, title, category, use_case, emotion, duration)
         except Exception as e:
             # Clean up the uploaded file if storage fails
             if os.path.exists(file_path):
@@ -105,11 +106,11 @@ async def upload_audio(
             "original_filename": file.filename,
             "transcription": transcription,
             "summary": summary,
-            "message": "Audio file processed and stored successfully",
             "title": title,
             "category": category,
             "use_case": use_case,
             "emotion": emotion,
+            "duration": duration
         }
         
     except HTTPException:
@@ -228,3 +229,35 @@ async def delete_user_conversation(user_id: str) -> Dict[str, Any]:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete conversation: {str(e)}")
+
+@router.get("/audios")
+async def get_all_audios(query: str = None) -> AudioListResponse:
+    """
+    Get all audios from ChromaDB with their metadata
+    """
+    try:
+        if query:
+            audios_data = chroma_manager.get_audio_by_query(query)
+        else: 
+            # Get all audios from ChromaDB
+            audios_data = chroma_manager.get_all_audios()
+        
+        # Convert to response format
+        audio_items = []
+        for audio_data in audios_data:
+            audio_item = AudioItem(
+                id=audio_data["id"],
+                document=audio_data["document"],
+                metadata=AudioMetadata(**audio_data["metadata"])
+            )
+            audio_items.append(audio_item)
+        
+        return AudioListResponse(
+            audios=audio_items,
+            total_count=len(audio_items)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve audios: {str(e)}")

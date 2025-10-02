@@ -34,7 +34,7 @@ class ChromaDBManager:
         except Exception as e:
             raise Exception(f"Error generating embeddings: {str(e)}")
          
-    def store_summary(self, audio_id: str, summary: str, title: str, category: str, use_case: str, emotion: str) -> str:
+    def store_summary(self, audio_id: str, summary: str, title: str, category: str, use_case: str, emotion: str, duration: str) -> str:
         """Store summary with embeddings in ChromaDB"""
         try:
             # Generate embeddings for the summary
@@ -47,7 +47,8 @@ class ChromaDBManager:
                 "title": title,
                 "category": category,
                 "use_case": use_case,
-                "emotion": emotion
+                "emotion": emotion,
+                "duration": duration
             }
             
             
@@ -82,7 +83,7 @@ class ChromaDBManager:
         except Exception as e:
             raise Exception(f"Error searching: {str(e)}")
     
-    def get_by_audio_id(self, audio_id: str) -> Dict[str, Any]:
+    def get_audio_by_query(self, audio_id: str) -> Dict[str, Any]:
         """Retrieve summary by audio ID"""
         try:
             result = self.collection.get(
@@ -99,4 +100,26 @@ class ChromaDBManager:
                 "metadata": result["metadatas"][0]
             }
         except Exception as e:
-            raise Exception(f"Error retrieving summary: {str(e)}")
+            raise Exception(f"Error retrieving audio: {str(e)}")
+    
+    def get_all_audios(self) -> List[Dict[str, Any]]:
+        """Retrieve all audio summaries with their metadata"""
+        try:
+            result = self.collection.get(
+                include=["documents", "metadatas"]
+            )
+            
+            if not result["ids"]:
+                return []
+            
+            audios = []
+            for i in range(len(result["ids"])):
+                audios.append({
+                    "id": result["ids"][i],
+                    "document": result["documents"][i],
+                    "metadata": result["metadatas"][i]
+                })
+            
+            return audios
+        except Exception as e:
+            raise Exception(f"Error retrieving all audios: {str(e)}")

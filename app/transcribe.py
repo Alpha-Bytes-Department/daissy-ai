@@ -3,6 +3,7 @@ import openai
 import os
 from typing import Tuple
 from dotenv import load_dotenv
+from moviepy.editor import AudioFileClip, VideoFileClip
 
 load_dotenv()
 
@@ -59,3 +60,16 @@ class AudioProcessor:
             return transcription, summary
         except Exception as e:
             raise Exception(f"Error processing audio: {str(e)}")
+        
+
+    def get_media_duration(self, file_path: str) -> str:
+        """
+        Return the duration of an audio file as MM:SS (zero-padded).
+        """
+        clip = AudioFileClip(file_path)
+        
+        duration_seconds = int(clip.duration)  # get total seconds
+        clip.close()
+
+        minutes, seconds = divmod(duration_seconds, 60)
+        return f"{minutes:02d}:{seconds:02d}"

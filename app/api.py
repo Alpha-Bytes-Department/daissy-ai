@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Form
 from fastapi.responses import FileResponse
 import uuid
 import os
@@ -33,7 +33,7 @@ def get_or_create_chat_bot(user_id: str) -> SimpleChatBot:
     return chat_bot
 
 # Ensure uploads directory exists
-UPLOAD_DIR = "uploads"
+UPLOAD_DIR = "voices"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Allowed audio file extensions
@@ -44,7 +44,13 @@ def is_allowed_file(filename: str) -> bool:
     return any(filename.lower().endswith(ext) for ext in ALLOWED_EXTENSIONS)
 
 @router.post("/upload-audio")
-async def upload_audio(file: UploadFile = File(...)) -> Dict[str, Any]:
+async def upload_audio(
+    title: str = Form(...), 
+    category: str = Form(...), 
+    use_case: str = Form(...),
+    emotion: str = Form(...),
+    file: UploadFile = File(...)
+    ) -> Dict[str, Any]:
     """
     Upload an audio file, transcribe it, summarize the transcription,
     and store the summary with embeddings in ChromaDB
@@ -85,7 +91,7 @@ async def upload_audio(file: UploadFile = File(...)) -> Dict[str, Any]:
         
         # Store summary in ChromaDB
         try:
-            stored_id = chroma_manager.store_summary(audio_id, summary, transcription)
+            stored_id = chroma_manager.store_summary(audio_id, summary, title, category, use_case, emotion)
         except Exception as e:
             # Clean up the uploaded file if storage fails
             if os.path.exists(file_path):
@@ -99,7 +105,11 @@ async def upload_audio(file: UploadFile = File(...)) -> Dict[str, Any]:
             "original_filename": file.filename,
             "transcription": transcription,
             "summary": summary,
-            "message": "Audio file processed and stored successfully"
+            "message": "Audio file processed and stored successfully",
+            "title": title,
+            "category": category,
+            "use_case": use_case,
+            "emotion": emotion,
         }
         
     except HTTPException:

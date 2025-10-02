@@ -34,7 +34,7 @@ class ChromaDBManager:
         except Exception as e:
             raise Exception(f"Error generating embeddings: {str(e)}")
          
-    def store_summary(self, audio_id: str, summary: str, transcription: str = None) -> str:
+    def store_summary(self, audio_id: str, summary: str, title: str, category: str, use_case: str, emotion: str) -> str:
         """Store summary with embeddings in ChromaDB"""
         try:
             # Generate embeddings for the summary
@@ -44,11 +44,12 @@ class ChromaDBManager:
             metadata = {
                 "audio_id": audio_id,
                 "summary_length": len(summary),
-                "has_transcription": transcription is not None
+                "title": title,
+                "category": category,
+                "use_case": use_case,
+                "emotion": emotion
             }
             
-            if transcription:
-                metadata["transcription_length"] = len(transcription)
             
             # Store in ChromaDB
             self.collection.add(

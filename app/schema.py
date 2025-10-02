@@ -46,12 +46,6 @@ class AudioMetadata(BaseModel):
     emotion: str
     duration: str
 
-class AudioItem(BaseModel):
-    id: str
-    document: str  # The summary text
-    metadata: AudioMetadata
-
 class AudioListResponse(BaseModel):
-    audios: List[AudioItem]
-    total_count: int
+    audios: List[AudioMetadata]
 

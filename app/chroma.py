@@ -83,30 +83,41 @@ class ChromaDBManager:
         except Exception as e:
             raise Exception(f"Error searching: {str(e)}")
     
-    def get_audio_by_query(self, audio_id: str) -> Dict[str, Any]:
-        """Retrieve summary by audio ID"""
+    def get_audio_by_query(self, query: str) -> List[Dict[str, Any]]:
+        """Filter audios by query string matching title, category, use_case, or emotion"""
         try:
+            # Get all audios first
             result = self.collection.get(
-                ids=[audio_id],
-                include=["documents", "metadatas"]
+                include=["metadatas"]
             )
             
             if not result["ids"]:
-                return None
+                return []
             
-            return {
-                "id": result["ids"][0],
-                "document": result["documents"][0],
-                "metadata": result["metadatas"][0]
-            }
+            # Filter based on query string matching metadata fields
+            filtered_audios = []
+            query_lower = query.lower()
+            
+            for i in range(len(result["ids"])):
+                metadata = result["metadatas"][i]
+                
+                # Check if query matches any of the metadata fields
+                if (query_lower in metadata.get("title", "").lower() or
+                    query_lower in metadata.get("category", "").lower() or
+                    query_lower in metadata.get("use_case", "").lower() or
+                    query_lower in metadata.get("emotion", "").lower()):
+                    
+                    filtered_audios.append({"metadata": metadata})
+            
+            return filtered_audios
         except Exception as e:
-            raise Exception(f"Error retrieving audio: {str(e)}")
+            raise Exception(f"Error filtering audios: {str(e)}")
     
     def get_all_audios(self) -> List[Dict[str, Any]]:
         """Retrieve all audio summaries with their metadata"""
         try:
             result = self.collection.get(
-                include=["documents", "metadatas"]
+                include=["metadatas"]
             )
             
             if not result["ids"]:
@@ -114,11 +125,7 @@ class ChromaDBManager:
             
             audios = []
             for i in range(len(result["ids"])):
-                audios.append({
-                    "id": result["ids"][i],
-                    "document": result["documents"][i],
-                    "metadata": result["metadatas"][i]
-                })
+                audios.append({"metadata": result["metadatas"][i]})
             
             return audios
         except Exception as e:

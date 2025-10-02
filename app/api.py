@@ -3,11 +3,11 @@ from fastapi.responses import FileResponse
 import uuid
 import os
 import shutil
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from transcribe import AudioProcessor
 from chroma import ChromaDBManager
 from chat import SimpleChatBot, AudioProvider
-from schema import SimpleChatResponse,AudioProviderResponse,ChatHistoryResponse,AudioListResponse,AudioItem,AudioMetadata
+from schema import SimpleChatResponse,AudioProviderResponse,ChatHistoryResponse,AudioListResponse,AudioMetadata
 
 router = APIRouter()
 
@@ -231,31 +231,25 @@ async def delete_user_conversation(user_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Failed to delete conversation: {str(e)}")
 
 @router.get("/audios")
-async def get_all_audios(query: str = None) -> AudioListResponse:
+async def get_all_audios(query: str = None) -> List[AudioMetadata]:
     """
     Get all audios from ChromaDB with their metadata
     """
     try:
         if query:
+            # Use get_audio_by_query method for metadata-based filtering
             audios_data = chroma_manager.get_audio_by_query(query)
         else: 
             # Get all audios from ChromaDB
             audios_data = chroma_manager.get_all_audios()
         
-        # Convert to response format
+        # Convert to response format - return simple list of AudioMetadata
         audio_items = []
         for audio_data in audios_data:
-            audio_item = AudioItem(
-                id=audio_data["id"],
-                document=audio_data["document"],
-                metadata=AudioMetadata(**audio_data["metadata"])
-            )
+            audio_item = AudioMetadata(**audio_data["metadata"])
             audio_items.append(audio_item)
         
-        return AudioListResponse(
-            audios=audio_items,
-            total_count=len(audio_items)
-        )
+        return audio_items
         
     except HTTPException:
         raise

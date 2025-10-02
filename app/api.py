@@ -256,7 +256,7 @@ async def get_all_audios(query: str = None) -> List[AudioMetadata]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve audios: {str(e)}")
 
-@router.delete("/audios/{audio_id}")
+@router.delete("/delete-audio")
 async def delete_audio(audio_id: str) -> Dict[str, Any]:
     """
     Delete an audio file and its record from ChromaDB

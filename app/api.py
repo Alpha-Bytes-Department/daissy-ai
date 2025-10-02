@@ -255,3 +255,50 @@ async def get_all_audios(query: str = None) -> List[AudioMetadata]:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve audios: {str(e)}")
+
+@router.delete("/audios/{audio_id}")
+async def delete_audio(audio_id: str) -> Dict[str, Any]:
+    """
+    Delete an audio file and its record from ChromaDB
+    """
+    try:
+        # First, get the audio metadata to find the filename
+        result = chroma_manager.collection.get(
+            ids=[audio_id],
+            include=["metadatas"]
+        )
+        
+        if not result["ids"]:
+            raise HTTPException(status_code=404, detail="Audio not found")
+        
+        # Find and delete the audio file from filesystem
+        audio_deleted = False
+        for filename in os.listdir(UPLOAD_DIR):
+            if filename.startswith(audio_id):
+                file_path = os.path.join(UPLOAD_DIR, filename)
+                try:
+                    os.remove(file_path)
+                    audio_deleted = True
+                    break
+                except OSError as e:
+                    # File might not exist or permission error
+                    print(f"Warning: Could not delete file {file_path}: {str(e)}")
+        
+        # Delete from ChromaDB
+        chroma_deleted = chroma_manager.delete_audio(audio_id)
+        
+        if not chroma_deleted:
+            raise HTTPException(status_code=404, detail="Audio record not found in database")
+        
+        return {
+            "success": True,
+            "audio_id": audio_id,
+            "message": "Audio deleted successfully",
+            "file_deleted": audio_deleted,
+            "database_deleted": chroma_deleted
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete audio: {str(e)}")

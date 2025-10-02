@@ -130,3 +130,21 @@ class ChromaDBManager:
             return audios
         except Exception as e:
             raise Exception(f"Error retrieving all audios: {str(e)}")
+    
+    def delete_audio(self, audio_id: str) -> bool:
+        """Delete audio record from ChromaDB"""
+        try:
+            # Check if audio exists first
+            result = self.collection.get(
+                ids=[audio_id],
+                include=["metadatas"]
+            )
+            
+            if not result["ids"]:
+                return False
+            
+            # Delete from ChromaDB
+            self.collection.delete(ids=[audio_id])
+            return True
+        except Exception as e:
+            raise Exception(f"Error deleting audio from ChromaDB: {str(e)}")

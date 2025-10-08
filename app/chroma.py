@@ -34,7 +34,7 @@ class ChromaDBManager:
         except Exception as e:
             raise Exception(f"Error generating embeddings: {str(e)}")
          
-    def store_summary(self, audio_id: str, summary: str, title: str, category: str, use_case: str, emotion: str, duration: str) -> str:
+    def store_summary(self, audio_id: str, summary: str, title: str, category: str, use_case: str, emotion: str, duration: str, status: str = "active") -> str:
         """Store summary with embeddings in ChromaDB"""
         try:
             # Generate embeddings for the summary
@@ -48,7 +48,8 @@ class ChromaDBManager:
                 "category": category,
                 "use_case": use_case,
                 "emotion": emotion,
-                "duration": duration
+                "duration": duration,
+                "status": status
             }
             
             

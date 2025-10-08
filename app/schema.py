@@ -45,6 +45,7 @@ class AudioMetadata(BaseModel):
     use_case: str
     emotion: str
     duration: str
+    status: str
 
 class AudioListResponse(BaseModel):
     audios: List[AudioMetadata]

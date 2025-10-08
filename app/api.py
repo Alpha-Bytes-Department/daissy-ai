@@ -304,13 +304,13 @@ async def change_audio_status(audio_id: str) -> Dict[str, Any]:
 @router.delete("/delete-audio")
 async def delete_audio(audio_id: str) -> Dict[str, Any]:
     """
-    Delete an audio file and its record from both ChromaDB and SQL database
+    Delete an audio file and its record completely from filesystem, ChromaDB and SQL database
     """
     try:
-        # First, check if audio exists in SQL database to get metadata
+        # First, check if audio exists in SQL database (including inactive ones)
         from database import get_database_manager
         db_manager = get_database_manager()
-        audio_data = db_manager.get_audio_data_by_id(audio_id)
+        audio_data = db_manager.get_audio_data_by_id(audio_id, include_inactive=True)
         
         if not audio_data:
             raise HTTPException(status_code=404, detail="Audio not found")
@@ -328,7 +328,7 @@ async def delete_audio(audio_id: str) -> Dict[str, Any]:
                     # File might not exist or permission error
                     print(f"Warning: Could not delete file {file_path}: {str(e)}")
         
-        # Delete from both ChromaDB and SQL database
+        # Delete from both ChromaDB and SQL database (hard delete)
         chroma_deleted = chroma_manager.delete_audio(audio_id)
         
         if not chroma_deleted:
@@ -337,7 +337,7 @@ async def delete_audio(audio_id: str) -> Dict[str, Any]:
         return {
             "success": True,
             "audio_id": audio_id,
-            "message": "Audio deleted successfully",
+            "message": "Audio permanently deleted from all systems",
             "file_deleted": audio_deleted,
             "database_deleted": chroma_deleted
         }

@@ -126,7 +126,7 @@ class ChromaDBManager:
             # Delete from ChromaDB
             self.collection.delete(ids=[audio_id])
             
-            # Delete from SQL database
+            # Permanently delete from SQL database
             db_manager = get_database_manager()
             db_manager.delete_audio_data(audio_id)
             

@@ -247,7 +247,7 @@ class DatabaseManager:
             }
     
     def get_all_audio_data(self) -> List[Dict[str, Any]]:
-        """Get all audio data regardless of status"""
+        """Get all audio data"""
         with self.get_db_session() as db:
             audio_records = db.query(AudioData).order_by(AudioData.created_at.desc()).all()
             
@@ -324,10 +324,6 @@ class DatabaseManager:
             return True
     
     def delete_audio_data(self, audio_id: str) -> bool:
-        """Soft delete audio data by setting status to 'deleted'"""
-        return self.update_audio_data(audio_id, status="deleted")
-    
-    def hard_delete_audio_data(self, audio_id: str) -> bool:
         """Permanently delete audio data from database"""
         with self.get_db_session() as db:
             deleted_count = db.query(AudioData).filter(AudioData.audio_id == audio_id).delete()

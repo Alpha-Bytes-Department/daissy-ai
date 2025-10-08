@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
+from datetime import datetime
 
 # Pydantic models for request/response
 class ChatRequest(BaseModel):
@@ -39,13 +40,14 @@ class ChatHistoryResponse(BaseModel):
 # Audio metadata models
 class AudioMetadata(BaseModel):
     audio_id: str
-    summary_length: int
     title: str
     category: str
     use_case: str
     emotion: str
     duration: str
     status: str
+    created_at: datetime
+    updated_at: datetime
 
 class AudioListResponse(BaseModel):
     audios: List[AudioMetadata]

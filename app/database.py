@@ -22,6 +22,20 @@ class ChatMessage(Base):
     content = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
+class AudioData(Base):
+    __tablename__ = "audio_data"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    audio_id = Column(String(255), unique=True, index=True, nullable=False)  # UUID for audio file identification
+    title = Column(String(500), nullable=False, index=True)  # Audio title for searchability
+    category = Column(String(100), nullable=False, index=True)  # Audio category
+    use_case = Column(String(200), nullable=False, index=True)  # Use case description
+    emotion = Column(String(100), nullable=False, index=True)  # Emotion tag
+    duration = Column(String(50), nullable=False)  # Duration as string (e.g., "2:30")
+    status = Column(String(20), nullable=False, default="active", index=True)  # Status (active, deleted, etc.)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
 class DatabaseManager:
     def __init__(self):
         self.connection_string = os.getenv("DATABASE_URL")
@@ -176,6 +190,148 @@ class DatabaseManager:
                 "first_message_time": result.first_message_time,
                 "last_message_time": result.last_message_time
             }
+    
+    # Audio Data Management Methods
+    def save_audio_data(self, audio_id: str, title: str, category: str, use_case: str, 
+                       emotion: str, duration: str, status: str = "active") -> Dict[str, Any]:
+        """Save audio metadata to the database"""
+        with self.get_db_session() as db:
+            audio_data = AudioData(
+                audio_id=audio_id,
+                title=title,
+                category=category,
+                use_case=use_case,
+                emotion=emotion,
+                duration=duration,
+                status=status
+            )
+            db.add(audio_data)
+            
+            # Convert to dict immediately to avoid detached instance issues
+            return {
+                "audio_id": audio_data.audio_id,
+                "title": audio_data.title,
+                "category": audio_data.category,
+                "use_case": audio_data.use_case,
+                "emotion": audio_data.emotion,
+                "duration": audio_data.duration,
+                "status": audio_data.status,
+                "created_at": audio_data.created_at,
+                "updated_at": audio_data.updated_at
+            }
+    
+    def get_audio_data_by_id(self, audio_id: str, include_inactive: bool = False) -> Optional[Dict[str, Any]]:
+        """Get audio data by audio_id"""
+        with self.get_db_session() as db:
+            query = db.query(AudioData).filter(AudioData.audio_id == audio_id)
+            
+            # Only filter by active status if include_inactive is False
+            if not include_inactive:
+                query = query.filter(AudioData.status == "active")
+            
+            audio_data = query.first()
+            
+            if not audio_data:
+                return None
+            
+            return {
+                "audio_id": audio_data.audio_id,
+                "title": audio_data.title,
+                "category": audio_data.category,
+                "use_case": audio_data.use_case,
+                "emotion": audio_data.emotion,
+                "duration": audio_data.duration,
+                "status": audio_data.status,
+                "created_at": audio_data.created_at,
+                "updated_at": audio_data.updated_at
+            }
+    
+    def get_all_audio_data(self) -> List[Dict[str, Any]]:
+        """Get all audio data regardless of status"""
+        with self.get_db_session() as db:
+            audio_records = db.query(AudioData).order_by(AudioData.created_at.desc()).all()
+            
+            return [
+                {
+                    "audio_id": audio.audio_id,
+                    "title": audio.title,
+                    "category": audio.category,
+                    "use_case": audio.use_case,
+                    "emotion": audio.emotion,
+                    "duration": audio.duration,
+                    "status": audio.status,
+                    "created_at": audio.created_at,
+                    "updated_at": audio.updated_at
+                }
+                for audio in audio_records
+            ]
+    
+    def search_audio_data(self, query: str) -> List[Dict[str, Any]]:
+        """Search audio data by query string matching title, category, use_case, or emotion"""
+        with self.get_db_session() as db:
+            query_lower = f"%{query.lower()}%"
+            
+            audio_records = db.query(AudioData).filter(
+                db.or_(
+                    AudioData.title.ilike(query_lower),
+                    AudioData.category.ilike(query_lower),
+                    AudioData.use_case.ilike(query_lower),
+                    AudioData.emotion.ilike(query_lower)
+                )
+            ).order_by(AudioData.created_at.desc()).all()
+            
+            return [
+                {
+                    "audio_id": audio.audio_id,
+                    "title": audio.title,
+                    "category": audio.category,
+                    "use_case": audio.use_case,
+                    "emotion": audio.emotion,
+                    "duration": audio.duration,
+                    "status": audio.status,
+                    "created_at": audio.created_at,
+                    "updated_at": audio.updated_at
+                }
+                for audio in audio_records
+            ]
+    
+    def update_audio_data(self, audio_id: str, title: Optional[str] = None, 
+                         category: Optional[str] = None, use_case: Optional[str] = None,
+                         emotion: Optional[str] = None, duration: Optional[str] = None,
+                         status: Optional[str] = None) -> bool:
+        """Update audio metadata"""
+        with self.get_db_session() as db:
+            audio_data = db.query(AudioData).filter(AudioData.audio_id == audio_id).first()
+            
+            if not audio_data:
+                return False
+            
+            # Update only provided fields
+            if title is not None:
+                audio_data.title = title
+            if category is not None:
+                audio_data.category = category
+            if use_case is not None:
+                audio_data.use_case = use_case
+            if emotion is not None:
+                audio_data.emotion = emotion
+            if duration is not None:
+                audio_data.duration = duration
+            if status is not None:
+                audio_data.status = status
+            
+            # updated_at will be automatically set by onupdate
+            return True
+    
+    def delete_audio_data(self, audio_id: str) -> bool:
+        """Soft delete audio data by setting status to 'deleted'"""
+        return self.update_audio_data(audio_id, status="deleted")
+    
+    def hard_delete_audio_data(self, audio_id: str) -> bool:
+        """Permanently delete audio data from database"""
+        with self.get_db_session() as db:
+            deleted_count = db.query(AudioData).filter(AudioData.audio_id == audio_id).delete()
+            return deleted_count > 0
 
 # Global database manager instance
 db_manager = None

@@ -90,14 +90,21 @@ async def upload_audio(
                 os.remove(file_path)
             raise HTTPException(status_code=500, detail=f"Audio processing failed: {str(e)}")
         
-        # Store summary in ChromaDB
+        # Store summary in ChromaDB and metadata in SQL database
         try:
-            chroma_manager.store_summary(audio_id, summary, title, category, use_case, emotion, duration)
+            # Store embeddings and summary in ChromaDB (minimal metadata)
+            chroma_manager.store_summary(audio_id, summary)
+            
+            # Store metadata in SQL database
+            from database import get_database_manager
+            db_manager = get_database_manager()
+            db_manager.save_audio_data(audio_id, title, category, use_case, emotion, duration)
+            
         except Exception as e:
             # Clean up the uploaded file if storage fails
             if os.path.exists(file_path):
                 os.remove(file_path)
-            raise HTTPException(status_code=500, detail=f"Failed to store in vector database: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to store audio data: {str(e)}")
         
         return {
             "success": True,
@@ -256,19 +263,56 @@ async def get_all_audios(query: str = None) -> List[AudioMetadata]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve audios: {str(e)}")
 
+@router.put("/change-audio-status")
+async def change_audio_status(audio_id: str) -> Dict[str, Any]:
+    """
+    Toggle audio status between 'active' and 'inactive'
+    """
+    try:
+        from database import get_database_manager
+        db_manager = get_database_manager()
+        
+        # Get current audio data (including inactive ones for status change)
+        audio_data = db_manager.get_audio_data_by_id(audio_id, include_inactive=True)
+        
+        if not audio_data:
+            raise HTTPException(status_code=404, detail="Audio not found")
+        
+        # Determine new status
+        current_status = audio_data.get("status", "active")
+        new_status = "inactive" if current_status == "active" else "active"
+        
+        # Update the status
+        success = db_manager.update_audio_data(audio_id, status=new_status)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update audio status")
+        
+        return {
+            "success": True,
+            "audio_id": audio_id,
+            "previous_status": current_status,
+            "new_status": new_status,
+            "message": f"Audio status changed from '{current_status}' to '{new_status}'"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to change audio status: {str(e)}")
+
 @router.delete("/delete-audio")
 async def delete_audio(audio_id: str) -> Dict[str, Any]:
     """
-    Delete an audio file and its record from ChromaDB
+    Delete an audio file and its record from both ChromaDB and SQL database
     """
     try:
-        # First, get the audio metadata to find the filename
-        result = chroma_manager.collection.get(
-            ids=[audio_id],
-            include=["metadatas"]
-        )
+        # First, check if audio exists in SQL database to get metadata
+        from database import get_database_manager
+        db_manager = get_database_manager()
+        audio_data = db_manager.get_audio_data_by_id(audio_id)
         
-        if not result["ids"]:
+        if not audio_data:
             raise HTTPException(status_code=404, detail="Audio not found")
         
         # Find and delete the audio file from filesystem
@@ -284,11 +328,11 @@ async def delete_audio(audio_id: str) -> Dict[str, Any]:
                     # File might not exist or permission error
                     print(f"Warning: Could not delete file {file_path}: {str(e)}")
         
-        # Delete from ChromaDB
+        # Delete from both ChromaDB and SQL database
         chroma_deleted = chroma_manager.delete_audio(audio_id)
         
         if not chroma_deleted:
-            raise HTTPException(status_code=404, detail="Audio record not found in database")
+            raise HTTPException(status_code=404, detail="Audio record not found in vector database")
         
         return {
             "success": True,

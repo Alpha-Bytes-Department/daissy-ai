@@ -5,6 +5,7 @@ import os
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 from datetime import datetime
+from database import get_database_manager
 load_dotenv()
 
 class ChromaDBManager:
@@ -34,24 +35,18 @@ class ChromaDBManager:
         except Exception as e:
             raise Exception(f"Error generating embeddings: {str(e)}")
          
-    def store_summary(self, audio_id: str, summary: str, title: str, category: str, use_case: str, emotion: str, duration: str, status: str = "active") -> str:
-        """Store summary with embeddings in ChromaDB"""
+    def store_summary(self, audio_id: str, summary: str) -> str:
+        """Store summary with embeddings in ChromaDB with minimal metadata"""
         try:
             # Generate embeddings for the summary
             embeddings = self.get_embeddings(summary)
             
-            # Prepare metadata
+            # Only store audio_id and summary_length as metadata
+            # All other metadata will be stored in SQL database
             metadata = {
                 "audio_id": audio_id,
-                "summary_length": len(summary),
-                "title": title,
-                "category": category,
-                "use_case": use_case,
-                "emotion": emotion,
-                "duration": duration,
-                "status": status
+                "summary_length": len(summary)
             }
-            
             
             # Store in ChromaDB
             self.collection.add(
@@ -87,55 +82,39 @@ class ChromaDBManager:
     def get_audio_by_query(self, query: str) -> List[Dict[str, Any]]:
         """Filter audios by query string matching title, category, use_case, or emotion"""
         try:
-            # Get all audios first
-            result = self.collection.get(
-                include=["metadatas"]
-            )
+            # Use SQL database for metadata search instead of ChromaDB
+            db_manager = get_database_manager()
+            audio_records = db_manager.search_audio_data(query)
             
-            if not result["ids"]:
-                return []
-            
-            # Filter based on query string matching metadata fields
+            # Convert to expected format
             filtered_audios = []
-            query_lower = query.lower()
-            
-            for i in range(len(result["ids"])):
-                metadata = result["metadatas"][i]
-                
-                # Check if query matches any of the metadata fields
-                if (query_lower in metadata.get("title", "").lower() or
-                    query_lower in metadata.get("category", "").lower() or
-                    query_lower in metadata.get("use_case", "").lower() or
-                    query_lower in metadata.get("emotion", "").lower()):
-                    
-                    filtered_audios.append({"metadata": metadata})
+            for record in audio_records:
+                filtered_audios.append({"metadata": record})
             
             return filtered_audios
         except Exception as e:
             raise Exception(f"Error filtering audios: {str(e)}")
     
     def get_all_audios(self) -> List[Dict[str, Any]]:
-        """Retrieve all audio summaries with their metadata"""
+        """Retrieve all audio summaries with their metadata from SQL database"""
         try:
-            result = self.collection.get(
-                include=["metadatas"]
-            )
+            # Use SQL database for metadata retrieval instead of ChromaDB
+            db_manager = get_database_manager()
+            audio_records = db_manager.get_all_audio_data()
             
-            if not result["ids"]:
-                return []
-            
+            # Convert to expected format
             audios = []
-            for i in range(len(result["ids"])):
-                audios.append({"metadata": result["metadatas"][i]})
+            for record in audio_records:
+                audios.append({"metadata": record})
             
             return audios
         except Exception as e:
             raise Exception(f"Error retrieving all audios: {str(e)}")
     
     def delete_audio(self, audio_id: str) -> bool:
-        """Delete audio record from ChromaDB"""
+        """Delete audio record from ChromaDB and SQL database"""
         try:
-            # Check if audio exists first
+            # Check if audio exists in ChromaDB first
             result = self.collection.get(
                 ids=[audio_id],
                 include=["metadatas"]
@@ -146,6 +125,11 @@ class ChromaDBManager:
             
             # Delete from ChromaDB
             self.collection.delete(ids=[audio_id])
+            
+            # Delete from SQL database
+            db_manager = get_database_manager()
+            db_manager.delete_audio_data(audio_id)
+            
             return True
         except Exception as e:
             raise Exception(f"Error deleting audio from ChromaDB: {str(e)}")

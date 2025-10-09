@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, JSON, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, JSON, Boolean, or_
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
@@ -272,7 +272,7 @@ class DatabaseManager:
             query_lower = f"%{query.lower()}%"
             
             audio_records = db.query(AudioData).filter(
-                db.or_(
+                or_(
                     AudioData.title.ilike(query_lower),
                     AudioData.category.ilike(query_lower),
                     AudioData.use_case.ilike(query_lower),

@@ -165,9 +165,14 @@ async def get_audio_for_query(query: str) -> AudioProviderResponse:
         # Use the stateless audio provider
         result = audio_provider.get_audio_and_suggestion(query)
         
+        # Handle case where no audio file was found
+        audio_path = None
+        if result["audio_file"] is not None:
+            audio_path = UPLOAD_DIR + "/" + result["audio_file"]["filename"]
+        
         return AudioProviderResponse(
             suggestion=result["suggestion"],
-            audio_file=UPLOAD_DIR+"/"+result["audio_file"]["filename"]
+            audio_file=audio_path
         )
         
     except HTTPException:

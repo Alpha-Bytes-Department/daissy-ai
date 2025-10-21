@@ -1,16 +1,16 @@
-import whisper
 import openai
 import os
 from typing import Tuple
 from dotenv import load_dotenv
 from moviepy.editor import AudioFileClip, VideoFileClip
+from faster_whisper import WhisperModel
 
 load_dotenv()
 
 class AudioProcessor:
     def __init__(self):
         # Initialize Whisper model (using base model for balance of speed and accuracy)
-        self.whisper_model = whisper.load_model("base")
+        self.whisper_model = WhisperModel("small", device="cpu")
         
         # Initialize OpenAI client for summarization
         openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -18,10 +18,19 @@ class AudioProcessor:
             raise ValueError("OPENAI_API_KEY environment variable is required")
     
     def transcribe_audio(self, audio_path: str) -> str:
-        """Transcribe audio file using Whisper"""
+        """Transcribe audio file using Faster Whisper"""
         try:
-            result = self.whisper_model.transcribe(audio_path)
-            return result["text"]
+            # Transcribe audio and get segments
+            segments, info = self.whisper_model.transcribe(audio_path)
+            
+            # Collect all transcribed text
+            transcription_text = []
+            for segment in segments:
+                print(f"[{segment.start:.2f}s → {segment.end:.2f}s] {segment.text}")
+                transcription_text.append(segment.text)
+            
+            # Join all segments into a single string
+            return " ".join(transcription_text)
         except Exception as e:
             raise Exception(f"Error transcribing audio: {str(e)}")
     

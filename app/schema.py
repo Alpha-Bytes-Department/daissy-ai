@@ -18,7 +18,7 @@ class AudioProviderRequest(BaseModel):
 
 class AudioProviderResponse(BaseModel):
     suggestion: str
-    audio_file: str
+    audio_file: Optional[str] = None
 
 # Pagination models
 class PaginationInfo(BaseModel):

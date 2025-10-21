@@ -167,7 +167,7 @@ class AudioProvider:
             best_audio = None
             best_score = -1  # Start with -1 to accept any result
             best_summary = None
-            uploads_dir = "voices"  # Fixed to match UPLOAD_DIR in api.py
+            uploads_dir = "voices" 
             
             if not os.path.exists(uploads_dir):
                 return None, None

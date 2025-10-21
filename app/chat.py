@@ -159,17 +159,18 @@ class AudioProvider:
         except Exception as e:
             raise Exception(f"Chat error: {str(e)}")
     
-    def _search_best_audio(self, user_query: str) -> Optional[Dict[str, Any]]:
+    def _search_best_audio(self, user_query: str) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
         """Search for the most relevant audio file based on user query"""
         try:
             search_results = self.chroma_manager.search_similar(user_query)
             
             best_audio = None
-            best_score = 0
-            uploads_dir = "uploads"
+            best_score = -1  # Start with -1 to accept any result
+            best_summary = None
+            uploads_dir = "voices"  # Fixed to match UPLOAD_DIR in api.py
             
             if not os.path.exists(uploads_dir):
-                return None
+                return None, None
             
             for doc, metadata, distance, doc_id in zip(
                 search_results["documents"],
@@ -177,36 +178,44 @@ class AudioProvider:
                 search_results["distances"],
                 search_results["ids"]
             ):
-                # Only consider highly relevant results (distance < 0.8)
-                if distance < 0.8:
-                    relevance_score = 1 - distance
-                    audio_id = metadata.get("audio_id", doc_id)
-                    
-                    # Check if audio file exists
-                    for filename in os.listdir(uploads_dir):
-                        if filename.startswith(audio_id):
-                            if relevance_score > best_score:
-                                best_score = relevance_score
-                                best_audio = {
-                                    "audio_id": audio_id,
-                                    "filename": filename,
-                                    "file_path": os.path.join(uploads_dir, filename),
-                                    "relevance_score": relevance_score,
-                                    "summary": doc
-                                }
-                            break
+                # Accept any result - no distance threshold filter
+                relevance_score = 1 - distance
+                audio_id = metadata.get("audio_id", doc_id)
+                
+                # Check if audio file exists
+                for filename in os.listdir(uploads_dir):
+                    if filename.startswith(audio_id):
+                        if relevance_score > best_score:
+                            best_score = relevance_score
+                            best_audio = {
+                                "audio_id": audio_id,
+                                "filename": filename,
+                                "file_path": os.path.join(uploads_dir, filename),
+                                "relevance_score": relevance_score,
+                                "summary": doc
+                            }
+                            best_summary = doc
+                        break
             
-            return best_audio, doc # best audio and summary 
+            return best_audio, best_summary
             
         except Exception as e:
             print(f"Warning: Could not search for audio: {e}")
-            return None
+            return None, None
 
     def get_audio_and_suggestion(self, user_query: str) -> Dict[str, Any]:
         """Get the best matching audio file for a user message"""
         try:
             # Search for relevant audio
             audio_file, summary = self._search_best_audio(user_query)
+            
+            # Check if we found an audio file and summary
+            if audio_file is None or summary is None:
+                return {
+                    "suggestion": "I couldn't find a relevant audio file for your query. Please try a different question.",
+                    "audio_file": None
+                }
+            
             suggestion = self._generate_suggestion(user_query, summary)
             return {
                 "suggestion": suggestion,

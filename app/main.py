@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import os
 import sys
 from dotenv import load_dotenv
@@ -33,6 +34,14 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(router, prefix="/ai", tags=["audio"])
+
+# Mount static files directory for audio files
+# Create voices directory if it doesn't exist
+VOICES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "voices")
+os.makedirs(VOICES_DIR, exist_ok=True)
+
+# Mount the voices directory to serve audio files
+app.mount("/voices", StaticFiles(directory=VOICES_DIR), name="voices")
 
 if __name__ == "__main__":
     import uvicorn

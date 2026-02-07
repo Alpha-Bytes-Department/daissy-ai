@@ -2,7 +2,7 @@ import openai
 import os
 from typing import Tuple
 from dotenv import load_dotenv
-from moviepy.editor import AudioFileClip, VideoFileClip
+from moviepy import AudioFileClip, VideoFileClip
 from faster_whisper import WhisperModel
 
 load_dotenv()

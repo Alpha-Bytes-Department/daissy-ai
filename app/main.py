@@ -5,8 +5,8 @@ import os
 import sys
 from dotenv import load_dotenv
 
-# Add parent directory to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add app directory to path for imports
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from .api import router
@@ -16,11 +16,18 @@ except ImportError:
 # Load environment variables
 load_dotenv()
 
+# Check if running in production
+IS_PRODUCTION = os.getenv("ENVIRONMENT", "development").lower() == "production"
+
+
 # Create FastAPI app
 app = FastAPI(
     title="Audio Processing & Consultation Finder API",
     description="API for uploading, processing consultation audio files and helping users find relevant consultations",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json"
 )
 
 # Add CORS middleware

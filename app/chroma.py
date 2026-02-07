@@ -1,3 +1,12 @@
+# Fix for older SQLite versions on production servers
+# ChromaDB requires sqlite3 >= 3.35.0
+import sys
+try:
+    __import__('pysqlite3')
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+except ImportError:
+    pass  # pysqlite3 not installed, use system sqlite3
+
 import chromadb
 from chromadb.config import Settings
 import openai

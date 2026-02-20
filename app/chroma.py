@@ -17,10 +17,15 @@ from datetime import datetime
 from database import get_database_manager
 load_dotenv()
 
+# Resolve chroma_db path relative to this file's location (project root)
+# Using an absolute path avoids PermissionError when gunicorn changes the CWD
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_CHROMA_DB_PATH = os.path.join(_PROJECT_ROOT, "chroma_db")
+
 class ChromaDBManager:
     def __init__(self):
         # Initialize ChromaDB client
-        self.client = chromadb.PersistentClient(path="./chroma_db")
+        self.client = chromadb.PersistentClient(path=_CHROMA_DB_PATH)
         
         # Initialize OpenAI client
         openai.api_key = os.getenv("OPENAI_API_KEY")
